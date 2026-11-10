@@ -54,7 +54,6 @@ export async function seedOrders(): Promise<void> {
     });
   }
 
-  // eslint-disable-next-line no-console
   console.log(`Seeded ${fixture.scenarios.length} orders from demo-scenarios.json`);
 }
 

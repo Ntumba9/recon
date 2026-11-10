@@ -3,7 +3,6 @@ type LogFields = Record<string, unknown>;
 function log(level: "info" | "warn" | "error", message: string, fields?: LogFields) {
   const entry = { level, message, time: new Date().toISOString(), ...fields };
   // Structured, single-line JSON logs so a request ID can be grepped across a run.
-  // eslint-disable-next-line no-console
   console[level === "error" ? "error" : "log"](JSON.stringify(entry));
 }
 

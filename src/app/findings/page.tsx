@@ -15,7 +15,7 @@ const MISMATCH_CLASSES = [
 const SEVERITIES = ["INFO", "WARNING", "CRITICAL"] as const;
 
 interface PageProps {
-  searchParams: { class?: string; severity?: string };
+  searchParams: Promise<{ class?: string; severity?: string }>;
 }
 
 /**
@@ -23,8 +23,9 @@ interface PageProps {
  * refund, retry, or booking-correction buttons exist anywhere in RECON.
  */
 export default async function FindingsPage({ searchParams }: PageProps) {
-  const classFilter = searchParams.class;
-  const severityFilter = searchParams.severity;
+  const resolvedSearchParams = await searchParams;
+  const classFilter = resolvedSearchParams.class;
+  const severityFilter = resolvedSearchParams.severity;
 
   const records = await prisma.findingRecord.findMany({
     where: {
