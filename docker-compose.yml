@@ -1,0 +1,50 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: recon
+      POSTGRES_PASSWORD: recon
+      POSTGRES_DB: recon
+    ports:
+      - "5432:5432"
+    volumes:
+      - recon-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U recon"]
+      interval: 2s
+      timeout: 5s
+      retries: 20
+
+  mock-provider:
+    build:
+      context: .
+      dockerfile: mock-provider/Dockerfile
+    environment:
+      PORT: 4000
+      MOCK_PROVIDER_WEBHOOK_SECRET: whsec_local_dev_only_not_a_real_secret
+      APP_WEBHOOK_URL: http://app:3000/api/webhooks/provider
+    ports:
+      - "4000:4000"
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mock-provider:
+        condition: service_started
+    environment:
+      DATABASE_URL: postgresql://recon:recon@postgres:5432/recon?schema=public
+      MOCK_PROVIDER_URL: http://mock-provider:4000
+      MOCK_PROVIDER_WEBHOOK_SECRET: whsec_local_dev_only_not_a_real_secret
+      PORT: 3000
+    ports:
+      - "3000:3000"
+    command: ["./scripts/docker-entrypoint.sh"]
+
+volumes:
+  recon-postgres-data:

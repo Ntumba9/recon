@@ -1,0 +1,14 @@
+{
+  "name": "recon-mock-provider",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Plain-JS Node simulator of a payment provider's HTTP API, for RECON's local demo. Not a real provider integration.",
+  "type": "commonjs",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "4.21.0"
+  }
+}

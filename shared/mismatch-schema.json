@@ -1,0 +1,42 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "RECON mismatch classes",
+  "description": "Shared contract for reconciliation findings. The TypeScript engine (src/core/reconciler) implements this now; a future offline Python CLI comparing an orders CSV with a provider settlement CSV must produce findings matching this same schema and the golden fixtures in shared/fixtures, so the two can be tested for identical behavior.",
+  "definitions": {
+    "mismatchClass": {
+      "enum": [
+        "SUCCESSFUL_PAYMENT_NOT_CONFIRMED",
+        "CONFIRMED_WITHOUT_SUCCESSFUL_PAYMENT",
+        "DUPLICATE_SUCCESSFUL_PAYMENT",
+        "AMOUNT_CURRENCY_MISMATCH",
+        "AGED_PENDING_BOOKING",
+        "WEBHOOK_PROVIDER_DISAGREEMENT"
+      ]
+    },
+    "severity": { "enum": ["INFO", "WARNING", "CRITICAL"] },
+    "finding": {
+      "type": "object",
+      "required": ["findingKey", "mismatchClass", "severity", "evidence"],
+      "properties": {
+        "findingKey": {
+          "type": "string",
+          "description": "Stable identity: a deterministic hash of mismatchClass plus the natural keys involved (order reference / provider payment id). Must not change across reruns of the same underlying discrepancy."
+        },
+        "mismatchClass": { "$ref": "#/definitions/mismatchClass" },
+        "severity": { "$ref": "#/definitions/severity" },
+        "orderReference": { "type": ["string", "null"] },
+        "providerPaymentId": { "type": ["string", "null"] },
+        "currency": { "type": ["string", "null"] },
+        "amountMinor": { "type": ["integer", "null"] },
+        "evidence": {
+          "type": "object",
+          "description": "IDs, amounts, and timestamps backing the finding - enough for a human to verify it without re-running the reconciler."
+        }
+      }
+    },
+    "runOutcome": {
+      "enum": ["SUCCESS", "INCONCLUSIVE", "FAILED"],
+      "description": "A run is INCONCLUSIVE (not 'no payment found') whenever provider data for the window was partial or unavailable - absence of a record in a partial export is never proof a payment doesn't exist."
+    }
+  }
+}

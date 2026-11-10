@@ -1,0 +1,79 @@
+{
+  "description": "Canonical demo scenarios shared by the seed script, the mock provider, and (later) the Python CSV CLI's golden fixtures. Each scenario independently describes the order side and the provider side so the two stores stay decoupled - nothing here lets one side imply the other.",
+  "currency": "ZAR",
+  "scenarios": [
+    {
+      "id": "clean",
+      "description": "Successful payment, webhook delivered, booking confirmed. No discrepancy.",
+      "order": { "reference": "ord_clean_001", "amountMinor": 15000, "bookingStatus": "CONFIRMED" },
+      "payments": [{ "amountMinor": 15000, "status": "successful" }],
+      "deliverWebhooks": true,
+      "expectedFindingClasses": []
+    },
+    {
+      "id": "lost_webhook",
+      "description": "Payment succeeded at the provider but the webhook was never delivered, so the booking is stuck PAYMENT_PENDING.",
+      "order": { "reference": "ord_lost_webhook_001", "amountMinor": 22000, "bookingStatus": "PAYMENT_PENDING", "createdAtOffsetHours": -3 },
+      "payments": [{ "amountMinor": 22000, "status": "successful" }],
+      "deliverWebhooks": false,
+      "expectedFindingClasses": ["SUCCESSFUL_PAYMENT_NOT_CONFIRMED"]
+    },
+    {
+      "id": "duplicate_payment",
+      "description": "Two successful payments recorded against the same order.",
+      "order": { "reference": "ord_duplicate_001", "amountMinor": 9900, "bookingStatus": "CONFIRMED", "createdAtOffsetHours": -3 },
+      "payments": [
+        { "amountMinor": 9900, "status": "successful" },
+        { "amountMinor": 9900, "status": "successful" }
+      ],
+      "deliverWebhooks": true,
+      "expectedFindingClasses": ["DUPLICATE_SUCCESSFUL_PAYMENT"]
+    },
+    {
+      "id": "wrong_amount",
+      "description": "The provider's successful payment amount does not match the order's amount.",
+      "order": { "reference": "ord_wrong_amount_001", "amountMinor": 10000, "bookingStatus": "CONFIRMED", "createdAtOffsetHours": -3 },
+      "payments": [{ "amountMinor": 9500, "status": "successful" }],
+      "deliverWebhooks": true,
+      "expectedFindingClasses": ["AMOUNT_CURRENCY_MISMATCH"]
+    },
+    {
+      "id": "confirmed_no_payment",
+      "description": "Booking is confirmed but the provider has no matching payment at all.",
+      "order": { "reference": "ord_confirmed_no_payment_001", "amountMinor": 18000, "bookingStatus": "CONFIRMED", "createdAtOffsetHours": -3 },
+      "payments": [],
+      "deliverWebhooks": false,
+      "expectedFindingClasses": ["CONFIRMED_WITHOUT_SUCCESSFUL_PAYMENT"]
+    },
+    {
+      "id": "aged_pending",
+      "description": "Booking has been PAYMENT_PENDING well past the grace period with no provider payment yet - needs investigation, not assumed lost.",
+      "order": {
+        "reference": "ord_aged_pending_001",
+        "amountMinor": 12000,
+        "bookingStatus": "PAYMENT_PENDING",
+        "createdAtOffsetHours": -48
+      },
+      "payments": [],
+      "deliverWebhooks": false,
+      "expectedFindingClasses": ["AGED_PENDING_BOOKING"]
+    },
+    {
+      "id": "refund",
+      "description": "Payment succeeded, then was refunded. A refund is not missing money and must not be flagged as one.",
+      "order": { "reference": "ord_refund_001", "amountMinor": 8000, "bookingStatus": "CANCELLED" },
+      "payments": [{ "amountMinor": 8000, "status": "refunded" }],
+      "deliverWebhooks": true,
+      "expectedFindingClasses": []
+    },
+    {
+      "id": "webhook_disagreement",
+      "description": "A webhook claimed the payment succeeded, but the provider's own record for that payment now says it failed.",
+      "order": { "reference": "ord_webhook_disagreement_001", "amountMinor": 13500, "bookingStatus": "CONFIRMED", "createdAtOffsetHours": -3 },
+      "payments": [{ "amountMinor": 13500, "status": "failed" }],
+      "deliverWebhooks": true,
+      "webhookOverrideStatus": "successful",
+      "expectedFindingClasses": ["WEBHOOK_PROVIDER_DISAGREEMENT"]
+    }
+  ]
+}

@@ -1,0 +1,119 @@
+// RECON data model.
+//
+// Orders and webhook events live here, on the app's side. The mock payment
+// provider (mock-provider/) keeps its own independent store and is reached
+// only through its HTTP API - this schema never represents provider state
+// as truth, only as a local record of what the app observed.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum BookingStatus {
+  PENDING
+  PAYMENT_PENDING
+  CONFIRMED
+  EXPIRED
+  CANCELLED
+}
+
+enum RunStatus {
+  SUCCESS
+  INCONCLUSIVE
+  FAILED
+}
+
+enum Severity {
+  INFO
+  WARNING
+  CRITICAL
+}
+
+/// A booking in the business's own system. Booking state and payment state
+/// are tracked separately on purpose: a CONFIRMED booking does not imply a
+/// successful payment was ever observed, and vice versa.
+model Order {
+  id            String        @id @default(cuid())
+  reference     String        @unique
+  currency      String
+  amountMinor   Int
+  bookingStatus BookingStatus @default(PENDING)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  @@index([bookingStatus])
+}
+
+/// A raw webhook delivery from the mock provider, kept for audit and for
+/// detecting webhook/provider disagreement. Never treated as proof of
+/// payment by itself - see src/core/webhooks.
+model WebhookEvent {
+  id                String   @id @default(cuid())
+  eventId           String   @unique
+  providerPaymentId String
+  orderReference    String?
+  type              String
+  signatureValid    Boolean
+  payload           Json
+  receivedAt        DateTime @default(now())
+
+  @@index([providerPaymentId])
+  @@index([orderReference])
+}
+
+/// One execution of the reconciler over a time window.
+model ReconciliationRun {
+  id                String      @id @default(cuid())
+  startedAt         DateTime    @default(now())
+  finishedAt        DateTime?
+  windowStart       DateTime
+  windowEnd         DateTime
+  status            RunStatus
+  providerAvailable Boolean     @default(true)
+  notes             String?
+  occurrences       FindingOccurrence[]
+}
+
+/// The stable identity of a finding. The same underlying discrepancy
+/// (e.g. "order X has a successful payment but is not confirmed") keeps the
+/// same findingKey across reruns, so reruns update firstSeen/lastSeen
+/// instead of creating duplicate findings.
+model FindingRecord {
+  id                String   @id @default(cuid())
+  findingKey        String   @unique
+  mismatchClass     String
+  orderReference    String?
+  providerPaymentId String?
+  currency          String?
+  amountMinor       Int?
+  firstSeenRunId    String
+  lastSeenRunId     String
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  occurrences FindingOccurrence[]
+
+  @@index([mismatchClass])
+  @@index([orderReference])
+}
+
+/// One run's evidence for a given FindingRecord. Preserves run history
+/// (what evidence looked like at the time) without duplicating identity.
+model FindingOccurrence {
+  id              String   @id @default(cuid())
+  findingRecordId String
+  findingRecord   FindingRecord     @relation(fields: [findingRecordId], references: [id])
+  runId           String
+  run             ReconciliationRun @relation(fields: [runId], references: [id])
+  severity        Severity
+  evidence        Json
+  createdAt       DateTime @default(now())
+
+  @@unique([findingRecordId, runId])
+  @@index([runId])
+}
