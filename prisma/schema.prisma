@@ -34,6 +34,15 @@ enum Severity {
   CRITICAL
 }
 
+/// Lifecycle of a FindingRecord. Only ever set by a human through the status
+/// API, except for the automatic OPEN reopening of a RESOLVED finding whose
+/// discrepancy recurs in a later complete run.
+enum FindingStatus {
+  OPEN
+  ACKNOWLEDGED
+  RESOLVED
+}
+
 /// A booking in the business's own system. Booking state and payment state
 /// are tracked separately on purpose: a CONFIRMED booking does not imply a
 /// successful payment was ever observed, and vice versa.
@@ -93,6 +102,9 @@ model FindingRecord {
   amountMinor       Int?
   firstSeenRunId    String
   lastSeenRunId     String
+  status            FindingStatus @default(OPEN)
+  note              String?
+  statusChangedAt   DateTime?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
@@ -100,6 +112,7 @@ model FindingRecord {
 
   @@index([mismatchClass])
   @@index([orderReference])
+  @@index([status])
 }
 
 /// One run's evidence for a given FindingRecord. Preserves run history

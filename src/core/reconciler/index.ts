@@ -28,6 +28,17 @@ export function reconcile(ctx: ReconcileContext): ReconcileResult {
     if (a.mismatchClass !== b.mismatchClass) return a.mismatchClass.localeCompare(b.mismatchClass);
     return (a.orderReference ?? "").localeCompare(b.orderReference ?? "");
   });
+
+  if (!ctx.complete) {
+    return {
+      status: "INCONCLUSIVE",
+      findings,
+      notes:
+        "Provider export for this window was incomplete or its declared total disagreed with what was fetched. " +
+        "Findings that depend on a payment's absence (CONFIRMED_WITHOUT_SUCCESSFUL_PAYMENT, AGED_PENDING_BOOKING) were suppressed for this run.",
+    };
+  }
+
   return { status: "SUCCESS", findings };
 }
 

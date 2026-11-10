@@ -6,12 +6,14 @@ import type { ProviderPayment } from "@/core/provider-adapter/types";
 const NOW = new Date("2026-06-01T12:00:00.000Z");
 
 function order(overrides: Partial<OrderRecord>): OrderRecord {
+  const createdAt = overrides.createdAt ?? new Date("2026-05-01T00:00:00.000Z");
   return {
     reference: "ord_1",
     currency: "ZAR",
     amountMinor: 10000,
     bookingStatus: "PENDING",
-    createdAt: new Date("2026-05-01T00:00:00.000Z"),
+    createdAt,
+    updatedAt: createdAt,
     ...overrides,
   };
 }
@@ -30,7 +32,7 @@ function payment(overrides: Partial<ProviderPayment>): ProviderPayment {
 }
 
 function baseCtx(overrides: Partial<ReconcileContext>): ReconcileContext {
-  return { orders: [], payments: [], webhookEvents: [], now: NOW, gracePeriodMs: 0, ...overrides };
+  return { orders: [], payments: [], webhookEvents: [], now: NOW, gracePeriodMs: 0, complete: true, ...overrides };
 }
 
 describe("reconcile", () => {
@@ -154,5 +156,68 @@ describe("reconcile", () => {
     const second = reconcile(ctx).findings[0]?.findingKey;
     expect(first).toBeDefined();
     expect(first).toBe(second);
+  });
+
+  describe("grace period for confirmedWithoutSuccessfulPayment", () => {
+    it("does not flag a booking confirmed just now, inside the grace window", () => {
+      const result = reconcile(
+        baseCtx({
+          orders: [order({ bookingStatus: "CONFIRMED", updatedAt: new Date(NOW.getTime() - 1000) })],
+          payments: [],
+          gracePeriodMs: 60 * 60 * 1000,
+        })
+      );
+      expect(result.findings).toHaveLength(0);
+    });
+
+    it("flags a booking confirmed well outside the grace window with still no payment", () => {
+      const result = reconcile(
+        baseCtx({
+          orders: [order({ bookingStatus: "CONFIRMED", updatedAt: new Date(NOW.getTime() - 2 * 60 * 60 * 1000) })],
+          payments: [],
+          gracePeriodMs: 60 * 60 * 1000,
+        })
+      );
+      expect(result.findings.map((f) => f.mismatchClass)).toEqual(["CONFIRMED_WITHOUT_SUCCESSFUL_PAYMENT"]);
+    });
+  });
+
+  describe("incomplete provider export", () => {
+    it("marks the run INCONCLUSIVE and explains why", () => {
+      const result = reconcile(baseCtx({ orders: [order({ bookingStatus: "CONFIRMED" })], payments: [], complete: false }));
+      expect(result.status).toBe("INCONCLUSIVE");
+      expect(result.notes).toBeDefined();
+    });
+
+    it("suppresses absence-based findings when the export is incomplete", () => {
+      const result = reconcile(
+        baseCtx({
+          orders: [
+            order({ reference: "ord_confirmed", bookingStatus: "CONFIRMED" }),
+            order({
+              reference: "ord_aged",
+              bookingStatus: "PAYMENT_PENDING",
+              createdAt: new Date("2026-01-01T00:00:00.000Z"),
+            }),
+          ],
+          payments: [],
+          gracePeriodMs: 0,
+          complete: false,
+        })
+      );
+      expect(result.findings).toHaveLength(0);
+    });
+
+    it("still reports presence-based findings even when the export is incomplete", () => {
+      const result = reconcile(
+        baseCtx({
+          orders: [order({ bookingStatus: "CONFIRMED", amountMinor: 10000 })],
+          payments: [payment({ amountMinor: 9500 })],
+          complete: false,
+        })
+      );
+      expect(result.status).toBe("INCONCLUSIVE");
+      expect(result.findings.map((f) => f.mismatchClass)).toEqual(["AMOUNT_CURRENCY_MISMATCH"]);
+    });
   });
 });

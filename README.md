@@ -83,7 +83,45 @@ Notes that shape every rule:
 
 - `pending` is never treated as `successful`.
 - A `refunded` payment is resolved money, not missing money, and is never flagged as a mismatch by itself.
-- A partial or unreachable provider export means the run is `INCONCLUSIVE`/`FAILED`, never "no payment found" - absence of a record in a partial export is not proof a payment doesn't exist.
+- A partial or unreachable provider export means the run is `INCONCLUSIVE`/`FAILED`, never "no payment found" - absence of a record in a partial export is not proof a payment doesn't exist. Concretely: `CONFIRMED_WITHOUT_SUCCESSFUL_PAYMENT` and `AGED_PENDING_BOOKING` are the two classes that rely on absence, so both are suppressed outright whenever the provider export isn't known to be complete (see "Run outcomes" below). The other four classes rely on the presence of a specific record, which a partial export doesn't call into question, so they still fire normally.
+- `CONFIRMED_WITHOUT_SUCCESSFUL_PAYMENT` also respects the grace period, measured from the order's `updatedAt`: a booking that was only just confirmed isn't flagged the instant it's checked, since the provider or the webhook that would corroborate it may simply not have caught up yet.
+
+### Run outcomes
+
+A run's `status` is `SUCCESS`, `INCONCLUSIVE`, or `FAILED`:
+
+- `FAILED` - the provider couldn't be reached at all, or returned a non-2xx response. No findings are produced.
+- `INCONCLUSIVE` - the provider responded, but its export is self-reportedly partial: pagination returned a malformed page, the response wasn't valid JSON, or its declared total disagreed with the number of records actually returned (`src/core/provider-adapter/mockProviderAdapter.ts`). Presence-based findings are still reported; absence-based ones are suppressed, and the run's `notes` explain why.
+- `SUCCESS` - the export was complete and every rule ran normally.
+
+The mock provider can simulate a partial export on demand: `POST /dev/simulate-truncation` with `{ "active": true }` makes every `/payments` page declare a `total` higher than what pagination will ever return. `scripts/demo.ts` exercises this as its own step, separate from the main scenario table, so the two don't get confused with each other.
+
+## Finding lifecycle
+
+Every `FindingRecord` carries a `status` - `OPEN`, `ACKNOWLEDGED`, or
+`RESOLVED` - plus an optional `note` and `statusChangedAt`. These fields
+annotate the finding only; nothing in the lifecycle ever writes to an
+`Order` or a payment, and there is still no refund, retry, or booking
+correction anywhere in RECON.
+
+- **Changing status**: `POST /api/findings/:id/status` with a JSON body
+  `{ "status": "ACKNOWLEDGED" | "RESOLVED" | "OPEN", "note"?: string }`.
+  The payload is validated (`src/core/findings/statusTransitionSchema.ts`)
+  and the status must be one of the three values above.
+- **On the findings page**: a status filter alongside the existing
+  mismatch-class and severity filters, the current status and note shown
+  per row, and action buttons (Acknowledge / Resolve / Reopen) that call
+  the endpoint above.
+- **Reopening**: if a `RESOLVED` finding's discrepancy is detected again in
+  a later `SUCCESS` run, it's automatically set back to `OPEN` and the new
+  occurrence is recorded - a resolved issue that comes back isn't silently
+  left resolved. An `INCONCLUSIVE` run never does this, even for a
+  presence-based finding that still shows up in its output: only a run
+  that completed normally can be trusted to say a resolved problem is
+  truly back.
+- **Nothing is ever auto-resolved.** The only automatic transition is the
+  reopen above; moving a finding to `ACKNOWLEDGED` or `RESOLVED` is always
+  a deliberate action through the status endpoint.
 
 ## Threat model
 
@@ -100,27 +138,28 @@ Notes that shape every rule:
   booking-confirmation update happen in one transaction; either both
   commit or neither does.
 - **Out of scope for this demo**: the findings UI has no authentication
-  (see Limits below), there is no rate limiting on the webhook endpoint,
-  and the mock provider has no analogous protections of its own since it
-  represents a third party RECON doesn't control.
+  (see Limits below), there is no rate limiting on the webhook endpoint or
+  the finding-status endpoint, and the mock provider has no analogous
+  protections of its own since it represents a third party RECON doesn't
+  control.
 
 ## Honest limits
 
-- **Unauthenticated, local-only demo.** The findings page and webhook
-  endpoint have no auth. This is explicitly not meant to run anywhere but
-  a local machine for this demo.
+- **Unauthenticated, local-only demo.** The findings page, the webhook
+  endpoint, and the finding-status endpoint all have no auth. This is
+  explicitly not meant to run anywhere but a local machine for this demo.
 - **No automated remediation.** RECON never issues refunds, retries
   charges, or changes a booking on its own. Every finding is for a human
-  to act on.
+  to act on, including every lifecycle status change.
 - **The mock provider is a mock.** It is a plausible, documented HTTP
   contract for demonstration - not a real integration with any provider.
-- **No fault injection for partial provider outages.** The adapter
-  correctly turns a total provider failure (unreachable, non-2xx) into a
-  `FAILED` run, but the mock provider itself doesn't simulate a provider
-  that is up but returning truncated data mid-export.
-- **Finding lifecycle is minimal.** Findings persist with stable identity
-  and run history, but there's no acknowledge/resolve/snooze workflow (see
-  Growth below).
+- **Truncation simulation is coarse.** `/dev/simulate-truncation` models
+  one specific failure mode (a declared total that doesn't match what
+  pagination returns); it doesn't simulate other partial-export shapes,
+  such as a page that times out mid-response.
+- **No snooze state, and no history of past status changes.** A finding
+  remembers only its current status, note, and when that status last
+  changed - not who changed it or what it was before.
 
 ## Running the demo
 
@@ -133,8 +172,10 @@ docker compose up --build
 This starts Postgres, the mock provider, and the app; applies migrations;
 seeds both independent stores from `shared/fixtures/demo-scenarios.json`
 (including a successful payment whose webhook is deliberately never
-delivered); runs a reconciliation; and prints an expected-vs-actual table
-for every scenario to the `app` container's logs. Once it's up:
+delivered); runs a reconciliation; prints an expected-vs-actual table for
+every scenario; and then separately turns on truncation simulation on the
+mock provider and runs a second reconciliation to show it come back
+`INCONCLUSIVE` - all to the `app` container's logs. Once it's up:
 
 - Findings UI: http://localhost:3005/findings (mapped from the container's port 3000; change the host-side port in `docker-compose.yml` if 3005 is also taken)
 - Mock provider health check: http://localhost:4000/health
@@ -156,6 +197,7 @@ npm run demo                        # terminal 3 - seeds both stores and reconci
 ```bash
 npm test          # unit + integration (integration needs DATABASE_URL set to a real Postgres)
 npm run typecheck
+npm run lint
 npm run secret-scan
 ```
 
@@ -168,8 +210,8 @@ npm run secret-scan
 - **Findings digest email** - a periodic summary of open findings.
 - **Scheduled runs** - running the reconciler on a timer instead of on
   demand.
-- **Finding lifecycle** - acknowledge/resolve/snooze states on top of the
-  existing stable identity.
+- **Snooze state and status history** - beyond the OPEN/ACKNOWLEDGED/RESOLVED
+  lifecycle that exists now.
 - **A second provider adapter** - proving `ProviderAdapter` generalizes
   beyond the mock.
 - **Multi-tenancy** - scoping orders, runs, and findings per business.

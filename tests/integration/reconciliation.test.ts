@@ -5,7 +5,9 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { sign } from "../../mock-provider/signature.js";
 import { handleWebhook } from "@/core/webhooks/handleWebhook";
 import { runReconciliation } from "@/core/reconciler/runReconciliation";
-import type { ProviderAdapter, ProviderPayment, ProviderPaymentStatus } from "@/core/provider-adapter/types";
+import type { ListAllPaymentsResult, ProviderAdapter, ProviderPayment, ProviderPaymentStatus } from "@/core/provider-adapter/types";
+import { POST as postFindingStatus } from "@/app/api/findings/[id]/status/route";
+import { NextRequest } from "next/server";
 
 const SECRET = "whsec_integration_test_secret_0123456789";
 
@@ -25,15 +27,24 @@ function loadFixture(): { currency: string; scenarios: Scenario[] } {
 
 /** Fakes the provider's independent store for this test, in-memory, implementing the same ProviderAdapter contract the real HTTP adapter does. */
 class FakeProviderAdapter implements ProviderAdapter {
-  constructor(private readonly payments: ProviderPayment[]) {}
+  constructor(private readonly payments: ProviderPayment[], private readonly complete: boolean = true) {}
 
-  async listAllPayments(): Promise<ProviderPayment[]> {
-    return this.payments;
+  async listAllPayments(): Promise<ListAllPaymentsResult> {
+    return { payments: this.payments, complete: this.complete, incompleteReason: this.complete ? undefined : "simulated incomplete export" };
   }
 
   async getPayment(id: string): Promise<ProviderPayment | null> {
     return this.payments.find((p) => p.id === id) ?? null;
   }
+}
+
+async function postStatus(id: string, body: { status: string; note?: string }) {
+  const request = new NextRequest("http://localhost/api/findings/" + id + "/status", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return postFindingStatus(request, { params: Promise.resolve({ id }) });
 }
 
 describe("reconciliation integration", () => {
@@ -170,5 +181,90 @@ describe("reconciliation integration", () => {
     });
 
     await expect(handleWebhook(prisma, body, "t=1,v1=deadbeef", SECRET, "req_bad_sig")).rejects.toThrow();
+  });
+
+  describe("finding lifecycle", () => {
+    it("transitions OPEN -> ACKNOWLEDGED -> RESOLVED with a note, and never touches the order", async () => {
+      const confirmedNoPayment = scenarios.find((s) => s.id === "confirmed_no_payment")!;
+      const record = await prisma.findingRecord.findFirstOrThrow({
+        where: { orderReference: confirmedNoPayment.order.reference, mismatchClass: "CONFIRMED_WITHOUT_SUCCESSFUL_PAYMENT" },
+      });
+      const orderBefore = await prisma.order.findUniqueOrThrow({ where: { reference: confirmedNoPayment.order.reference } });
+
+      const ackRes = await postStatus(record.id, { status: "ACKNOWLEDGED", note: "investigating" });
+      expect(ackRes.status).toBe(200);
+      let updated = await prisma.findingRecord.findUniqueOrThrow({ where: { id: record.id } });
+      expect(updated.status).toBe("ACKNOWLEDGED");
+      expect(updated.note).toBe("investigating");
+      expect(updated.statusChangedAt).not.toBeNull();
+
+      const resolveRes = await postStatus(record.id, { status: "RESOLVED", note: "confirmed manually offline" });
+      expect(resolveRes.status).toBe(200);
+      updated = await prisma.findingRecord.findUniqueOrThrow({ where: { id: record.id } });
+      expect(updated.status).toBe("RESOLVED");
+      expect(updated.note).toBe("confirmed manually offline");
+
+      const orderAfter = await prisma.order.findUniqueOrThrow({ where: { reference: confirmedNoPayment.order.reference } });
+      expect(orderAfter).toEqual(orderBefore);
+    });
+
+    it("rejects an invalid status value", async () => {
+      const record = await prisma.findingRecord.findFirstOrThrow();
+      const res = await postStatus(record.id, { status: "CLOSED" });
+      expect(res.status).toBe(400);
+    });
+
+    it("returns 404 for an unknown finding id", async () => {
+      const res = await postStatus("not-a-real-id", { status: "ACKNOWLEDGED" });
+      expect(res.status).toBe(404);
+    });
+
+    it("reopens a RESOLVED finding when its discrepancy recurs in a later complete run", async () => {
+      const confirmedNoPayment = scenarios.find((s) => s.id === "confirmed_no_payment")!;
+      const record = await prisma.findingRecord.findFirstOrThrow({
+        where: { orderReference: confirmedNoPayment.order.reference, mismatchClass: "CONFIRMED_WITHOUT_SUCCESSFUL_PAYMENT" },
+      });
+
+      // Resolved by the previous test in this describe block; reconfirm here so this test is self-sufficient.
+      await prisma.findingRecord.update({ where: { id: record.id }, data: { status: "RESOLVED", statusChangedAt: new Date() } });
+
+      const adapter = new FakeProviderAdapter(payments, true);
+      await runReconciliation({
+        prisma,
+        adapter,
+        windowStart: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
+        windowEnd: new Date(Date.now() + 60 * 60 * 1000),
+        gracePeriodMs: 0,
+      });
+
+      const reopened = await prisma.findingRecord.findUniqueOrThrow({ where: { id: record.id } });
+      expect(reopened.status).toBe("OPEN");
+    });
+
+    it("does not reopen a RESOLVED finding from an incomplete run, even one that still recurs in the output", async () => {
+      // AMOUNT_CURRENCY_MISMATCH is presence-based, so it still appears when
+      // the export is incomplete - this specifically exercises the
+      // allowStatusTransitions gate, not the rule-level absence suppression.
+      const wrongAmount = scenarios.find((s) => s.id === "wrong_amount")!;
+      const record = await prisma.findingRecord.findFirstOrThrow({
+        where: { orderReference: wrongAmount.order.reference, mismatchClass: "AMOUNT_CURRENCY_MISMATCH" },
+      });
+      await prisma.findingRecord.update({ where: { id: record.id }, data: { status: "RESOLVED", statusChangedAt: new Date() } });
+
+      const adapter = new FakeProviderAdapter(payments, false);
+      const result = await runReconciliation({
+        prisma,
+        adapter,
+        windowStart: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
+        windowEnd: new Date(Date.now() + 60 * 60 * 1000),
+        gracePeriodMs: 0,
+      });
+
+      expect(result.status).toBe("INCONCLUSIVE");
+      expect(result.findings.map((f) => f.mismatchClass)).toContain("AMOUNT_CURRENCY_MISMATCH");
+
+      const stillResolved = await prisma.findingRecord.findUniqueOrThrow({ where: { id: record.id } });
+      expect(stillResolved.status).toBe("RESOLVED");
+    });
   });
 });

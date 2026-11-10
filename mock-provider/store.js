@@ -10,12 +10,29 @@ let payments = new Map();
 let webhookLog = [];
 let sentWebhooks = new Map();
 let nextSeq = 1;
+let truncationExtraCount = 0;
 
 function reset() {
   payments = new Map();
   webhookLog = [];
   sentWebhooks = new Map();
   nextSeq = 1;
+  truncationExtraCount = 0;
+}
+
+/**
+ * Simulates a partial export: when active, every /payments page declares a
+ * `total` that is higher than the number of records the listing will ever
+ * actually return, the way a provider's settlement export can silently
+ * drop rows. `extraCount` (default 1) is how many "missing" records to
+ * claim.
+ */
+function setSimulateTruncation(active, extraCount) {
+  truncationExtraCount = active ? Math.max(1, extraCount || 1) : 0;
+}
+
+function isSimulatingTruncation() {
+  return truncationExtraCount > 0;
 }
 
 function nextPaymentId() {
@@ -79,7 +96,7 @@ function listPayments({ from, to, cursor, limit } = {}) {
   const hasMore = startIndex + pageLimit < all.length;
   const nextCursor = hasMore ? page[page.length - 1].id : null;
 
-  return { data: page, nextCursor, hasMore, total: all.length };
+  return { data: page, nextCursor, hasMore, total: all.length + truncationExtraCount };
 }
 
 function logWebhookAttempt(entry) {
@@ -108,4 +125,6 @@ module.exports = {
   getWebhookLog,
   recordSentWebhook,
   getSentWebhook,
+  setSimulateTruncation,
+  isSimulatingTruncation,
 };
