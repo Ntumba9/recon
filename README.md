@@ -136,7 +136,7 @@ seeds both independent stores from `shared/fixtures/demo-scenarios.json`
 delivered); runs a reconciliation; and prints an expected-vs-actual table
 for every scenario to the `app` container's logs. Once it's up:
 
-- Findings UI: http://localhost:3000/findings
+- Findings UI: http://localhost:3005/findings (mapped from the container's port 3000; change the host-side port in `docker-compose.yml` if 3005 is also taken)
 - Mock provider health check: http://localhost:4000/health
 
 ### Running without Docker
