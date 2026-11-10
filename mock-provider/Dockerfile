@@ -1,5 +1,11 @@
 FROM node:20-alpine
 
+WORKDIR /app
+
+# scenarios.js reads ../shared/fixtures relative to mock-provider/, so shared/
+# must sit alongside mock-provider/ here just as it does in the repo.
+COPY shared/ shared/
+
 WORKDIR /app/mock-provider
 
 COPY mock-provider/package.json ./

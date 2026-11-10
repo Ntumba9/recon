@@ -54,6 +54,9 @@ jobs:
       - name: npm audit
         run: npm audit --audit-level=high
 
+      - name: npm audit (mock-provider)
+        run: npm audit --audit-level=high --prefix mock-provider
+
       - name: Secret scan
         run: npm run secret-scan
 
