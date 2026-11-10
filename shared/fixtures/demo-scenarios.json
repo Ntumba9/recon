@@ -68,12 +68,12 @@
     },
     {
       "id": "webhook_disagreement",
-      "description": "A webhook claimed the payment succeeded, but the provider's own record for that payment now says it failed.",
+      "description": "A webhook claimed the payment succeeded, but the provider's own record for that payment now says it failed. The booking was confirmed on the strength of that webhook, so this is also, correctly, a confirmed booking with no successful payment.",
       "order": { "reference": "ord_webhook_disagreement_001", "amountMinor": 13500, "bookingStatus": "CONFIRMED", "createdAtOffsetHours": -3 },
       "payments": [{ "amountMinor": 13500, "status": "failed" }],
       "deliverWebhooks": true,
       "webhookOverrideStatus": "successful",
-      "expectedFindingClasses": ["WEBHOOK_PROVIDER_DISAGREEMENT"]
+      "expectedFindingClasses": ["CONFIRMED_WITHOUT_SUCCESSFUL_PAYMENT", "WEBHOOK_PROVIDER_DISAGREEMENT"]
     }
   ]
 }
