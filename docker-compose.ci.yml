@@ -1,0 +1,14 @@
+## CI-only override for docker-compose.yml.
+##
+## The main workflow already runs its own Postgres as a GitHub Actions
+## service container bound to host port 5432 (for the "Unit and integration
+## tests" step). The Docker Compose smoke test's own postgres container
+## would otherwise try to bind that same host port and fail to start -
+## container-to-container traffic between app/mock-provider and postgres
+## always goes through the internal Docker network (service name, port
+## 5432), never through this host-side mapping, so remapping it here has no
+## effect on the running stack itself.
+services:
+  postgres:
+    ports:
+      - "5433:5432"

@@ -5,26 +5,14 @@
  * reconciliation, and prints expected vs. actual findings so the whole
  * pipeline's behavior is visible from a single command.
  */
-import fs from "fs";
-import path from "path";
 import { PrismaClient } from "@prisma/client";
 import { seedOrders } from "../prisma/seed";
+import { loadDemoFixture } from "../src/lib/demoFixture";
 import { MockProviderAdapter } from "../src/core/provider-adapter/mockProviderAdapter";
+import { computeDefaultWindow } from "../src/core/reconciler/defaultWindow";
 import { runReconciliation } from "../src/core/reconciler/runReconciliation";
 
 const MOCK_PROVIDER_URL = process.env.MOCK_PROVIDER_URL || "http://localhost:4000";
-
-interface Scenario {
-  id: string;
-  description: string;
-  order: { reference: string };
-  expectedFindingClasses: string[];
-}
-
-function loadFixture(): { scenarios: Scenario[]; truncationDemo: { description: string; expectedRunStatus: string } } {
-  const fixturePath = path.join(__dirname, "..", "shared", "fixtures", "demo-scenarios.json");
-  return JSON.parse(fs.readFileSync(fixturePath, "utf8"));
-}
 
 async function seedMockProvider(): Promise<void> {
   const res = await fetch(new URL("/dev/seed", MOCK_PROVIDER_URL), { method: "POST" });
@@ -57,8 +45,7 @@ async function main() {
 
     console.log("3. Running reconciliation...");
     const adapter = new MockProviderAdapter(MOCK_PROVIDER_URL);
-    const windowStart = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-    const windowEnd = new Date(Date.now() + 60 * 60 * 1000);
+    const { windowStart, windowEnd } = computeDefaultWindow();
 
     const result = await runReconciliation({
       prisma,
@@ -70,7 +57,7 @@ async function main() {
 
     console.log(`   Run ${result.runId}: status=${result.status}, findings=${result.findings.length}\n`);
 
-    const { scenarios, truncationDemo } = loadFixture();
+    const { scenarios, truncationDemo } = loadDemoFixture();
     const actualByOrder = new Map<string, Set<string>>();
     for (const finding of result.findings) {
       if (!finding.orderReference) continue;

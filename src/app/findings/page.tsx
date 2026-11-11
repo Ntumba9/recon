@@ -1,4 +1,5 @@
 import type { CSSProperties } from "react";
+import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { FindingActions } from "./FindingActions";
 
@@ -55,6 +56,9 @@ export default async function FindingsPage({ searchParams }: PageProps) {
       <p style={{ color: "#555", marginTop: 0 }}>
         Synthetic demo data only. Unauthenticated local demo - the status actions below annotate a finding only; no
         refund, retry, or booking correction happens anywhere in RECON.
+      </p>
+      <p style={{ marginTop: 0 }}>
+        <Link href="/runs">View run history / trigger a run</Link>
       </p>
 
       <form method="get" style={{ display: "flex", gap: 12, marginBottom: 24 }}>
@@ -132,7 +136,7 @@ export default async function FindingsPage({ searchParams }: PageProps) {
                   </pre>
                 </td>
                 <td style={cellStyle}>
-                  <FindingActions id={record.id} status={record.status} />
+                  <FindingActions id={record.id} status={record.status} note={record.note} />
                 </td>
               </tr>
             );

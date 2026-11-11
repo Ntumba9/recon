@@ -36,6 +36,10 @@ jobs:
           node-version: "20"
           cache: "npm"
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
       - name: Install dependencies
         run: npm ci
 
@@ -54,6 +58,10 @@ jobs:
       - name: Unit and integration tests
         run: npm test
 
+      - name: Python CLI tests
+        run: python -m unittest discover -s tests -v
+        working-directory: python-cli
+
       - name: npm audit
         run: npm audit --audit-level=high
 
@@ -68,3 +76,44 @@ jobs:
 
       - name: Docker build (mock provider)
         run: docker build -f mock-provider/Dockerfile -t recon-mock-provider:ci .
+
+      - name: Docker Compose smoke test
+        run: |
+          set -e
+          docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d --build
+
+          echo "Waiting for the app to become healthy..."
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:3005/api/health >/dev/null 2>&1; then
+              echo "app is healthy"
+              break
+            fi
+            sleep 2
+          done
+
+          echo "Waiting for the mock provider to become healthy..."
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:4000/health >/dev/null 2>&1; then
+              echo "mock provider is healthy"
+              break
+            fi
+            sleep 2
+          done
+
+          echo "Running the real demo inside the app container (asserts every scenario's expected findings and the incomplete-export -> INCONCLUSIVE behavior; a non-zero exit here fails this step)..."
+          docker compose -f docker-compose.yml -f docker-compose.ci.yml exec -T app npx tsx scripts/demo.ts
+
+      - name: Collect Docker Compose logs on failure
+        if: failure()
+        run: docker compose -f docker-compose.yml -f docker-compose.ci.yml logs --no-color > docker-compose-smoke.log || true
+
+      - name: Upload smoke test logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-compose-smoke-logs
+          path: docker-compose-smoke.log
+
+      - name: Docker Compose cleanup
+        if: always()
+        run: docker compose -f docker-compose.yml -f docker-compose.ci.yml down -v

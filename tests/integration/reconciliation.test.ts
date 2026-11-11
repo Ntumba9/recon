@@ -38,7 +38,7 @@ class FakeProviderAdapter implements ProviderAdapter {
   }
 }
 
-async function postStatus(id: string, body: { status: string; note?: string }) {
+async function postStatus(id: string, body: { status: string; note?: string | null }) {
   const request = new NextRequest("http://localhost/api/findings/" + id + "/status", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -265,6 +265,63 @@ describe("reconciliation integration", () => {
 
       const stillResolved = await prisma.findingRecord.findUniqueOrThrow({ where: { id: record.id } });
       expect(stillResolved.status).toBe("RESOLVED");
+    });
+
+    describe("note preservation contract", () => {
+      async function findingWithNote(note: string) {
+        const scenario = scenarios.find((s) => s.id === "aged_pending")!;
+        const record = await prisma.findingRecord.findFirstOrThrow({
+          where: { orderReference: scenario.order.reference, mismatchClass: "AGED_PENDING_BOOKING" },
+        });
+        await prisma.findingRecord.update({ where: { id: record.id }, data: { note } });
+        return record.id;
+      }
+
+      it("omitting note from the request body preserves the existing note", async () => {
+        const id = await findingWithNote("keep me");
+        const res = await postStatus(id, { status: "ACKNOWLEDGED" });
+        expect(res.status).toBe(200);
+        const updated = await prisma.findingRecord.findUniqueOrThrow({ where: { id } });
+        expect(updated.note).toBe("keep me");
+        expect(updated.status).toBe("ACKNOWLEDGED");
+      });
+
+      it("note: null explicitly clears the existing note", async () => {
+        const id = await findingWithNote("to be cleared");
+        const res = await postStatus(id, { status: "ACKNOWLEDGED", note: null });
+        expect(res.status).toBe(200);
+        const updated = await prisma.findingRecord.findUniqueOrThrow({ where: { id } });
+        expect(updated.note).toBeNull();
+      });
+
+      it("note: '' (empty after trimming) explicitly clears the existing note", async () => {
+        const id = await findingWithNote("to be cleared too");
+        const res = await postStatus(id, { status: "ACKNOWLEDGED", note: "   " });
+        expect(res.status).toBe(200);
+        const updated = await prisma.findingRecord.findUniqueOrThrow({ where: { id } });
+        expect(updated.note).toBeNull();
+      });
+
+      it("a non-empty note replaces the existing note", async () => {
+        const id = await findingWithNote("old note");
+        const res = await postStatus(id, { status: "ACKNOWLEDGED", note: "new note" });
+        expect(res.status).toBe(200);
+        const updated = await prisma.findingRecord.findUniqueOrThrow({ where: { id } });
+        expect(updated.note).toBe("new note");
+      });
+
+      it("omitting note on a finding that never had one leaves it null", async () => {
+        const scenario = scenarios.find((s) => s.id === "duplicate_payment")!;
+        const record = await prisma.findingRecord.findFirstOrThrow({
+          where: { orderReference: scenario.order.reference, mismatchClass: "DUPLICATE_SUCCESSFUL_PAYMENT" },
+        });
+        await prisma.findingRecord.update({ where: { id: record.id }, data: { note: null } });
+
+        const res = await postStatus(record.id, { status: "ACKNOWLEDGED" });
+        expect(res.status).toBe(200);
+        const updated = await prisma.findingRecord.findUniqueOrThrow({ where: { id: record.id } });
+        expect(updated.note).toBeNull();
+      });
     });
   });
 });

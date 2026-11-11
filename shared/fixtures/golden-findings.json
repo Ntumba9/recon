@@ -1,0 +1,189 @@
+{
+  "description": "Golden reconciliation output for the shared demo scenarios, generated from the TypeScript engine against a fixed, deterministic input (see tests/helpers/goldenFixtureBuilder.ts). Checked by tests/unit/goldenFindings.test.ts (TypeScript) and python-cli/tests/test_parity.py (Python) so both implementations are verified against the same frozen output. Regenerate with: npx tsx scripts/generate-golden-findings.ts",
+  "complete": {
+    "status": "SUCCESS",
+    "findings": [
+      {
+        "findingKey": "ff08175bf35c10ae97cbabcc9aabf322",
+        "mismatchClass": "AGED_PENDING_BOOKING",
+        "severity": "WARNING",
+        "orderReference": "ord_aged_pending_001",
+        "providerPaymentId": null,
+        "currency": "ZAR",
+        "amountMinor": 12000,
+        "evidence": {
+          "orderBookingStatus": "PAYMENT_PENDING",
+          "orderCreatedAt": "2025-12-30T00:00:00.000Z",
+          "ageMs": 172800000
+        }
+      },
+      {
+        "findingKey": "a17dd873258887bc7655ef9e9bbe1d50",
+        "mismatchClass": "AMOUNT_CURRENCY_MISMATCH",
+        "severity": "CRITICAL",
+        "orderReference": "ord_wrong_amount_001",
+        "providerPaymentId": "pay_000005",
+        "currency": "ZAR",
+        "amountMinor": 9500,
+        "evidence": {
+          "orderAmountMinor": 10000,
+          "orderCurrency": "ZAR",
+          "paymentAmountMinor": 9500,
+          "paymentCurrency": "ZAR",
+          "amountMismatch": true,
+          "currencyMismatch": false
+        }
+      },
+      {
+        "findingKey": "46ea26bf4b9566ecd6e93e16bec1b98f",
+        "mismatchClass": "CONFIRMED_WITHOUT_SUCCESSFUL_PAYMENT",
+        "severity": "CRITICAL",
+        "orderReference": "ord_confirmed_no_payment_001",
+        "providerPaymentId": null,
+        "currency": "ZAR",
+        "amountMinor": 18000,
+        "evidence": {
+          "orderBookingStatus": "CONFIRMED",
+          "matchingPaymentsFound": 0,
+          "orderUpdatedAt": "2025-12-31T21:00:00.000Z",
+          "ageSinceUpdateMs": 10800000
+        }
+      },
+      {
+        "findingKey": "e156a4c7c8e89ebf8d6af2126bda7c34",
+        "mismatchClass": "CONFIRMED_WITHOUT_SUCCESSFUL_PAYMENT",
+        "severity": "CRITICAL",
+        "orderReference": "ord_webhook_disagreement_001",
+        "providerPaymentId": null,
+        "currency": "ZAR",
+        "amountMinor": 13500,
+        "evidence": {
+          "orderBookingStatus": "CONFIRMED",
+          "matchingPaymentsFound": 0,
+          "orderUpdatedAt": "2025-12-31T21:00:00.000Z",
+          "ageSinceUpdateMs": 10800000
+        }
+      },
+      {
+        "findingKey": "ffe89bac1ba5448ec678ad025816c4e2",
+        "mismatchClass": "DUPLICATE_SUCCESSFUL_PAYMENT",
+        "severity": "CRITICAL",
+        "orderReference": "ord_duplicate_001",
+        "providerPaymentId": "pay_000003",
+        "currency": "ZAR",
+        "amountMinor": 19800,
+        "evidence": {
+          "paymentIds": [
+            "pay_000003",
+            "pay_000004"
+          ],
+          "count": 2,
+          "perPaymentAmountsMinor": [
+            9900,
+            9900
+          ]
+        }
+      },
+      {
+        "findingKey": "9373727679e21bb7b9d2467f8a63f499",
+        "mismatchClass": "SUCCESSFUL_PAYMENT_NOT_CONFIRMED",
+        "severity": "CRITICAL",
+        "orderReference": "ord_lost_webhook_001",
+        "providerPaymentId": "pay_000002",
+        "currency": "ZAR",
+        "amountMinor": 22000,
+        "evidence": {
+          "orderBookingStatus": "PAYMENT_PENDING",
+          "paymentStatus": "successful",
+          "paymentUpdatedAt": "2025-12-31T21:00:00.000Z"
+        }
+      },
+      {
+        "findingKey": "759caec927cd1af826602f2b840398e7",
+        "mismatchClass": "WEBHOOK_PROVIDER_DISAGREEMENT",
+        "severity": "CRITICAL",
+        "orderReference": "ord_webhook_disagreement_001",
+        "providerPaymentId": "pay_000007",
+        "currency": "ZAR",
+        "amountMinor": 13500,
+        "evidence": {
+          "webhookEventId": "evt_webhook_disagreement_fixed",
+          "webhookClaimedStatus": "successful",
+          "providerCurrentStatus": "failed",
+          "webhookReceivedAt": "2025-12-31T21:00:00.000Z"
+        }
+      }
+    ]
+  },
+  "incomplete": {
+    "status": "INCONCLUSIVE",
+    "findings": [
+      {
+        "findingKey": "a17dd873258887bc7655ef9e9bbe1d50",
+        "mismatchClass": "AMOUNT_CURRENCY_MISMATCH",
+        "severity": "CRITICAL",
+        "orderReference": "ord_wrong_amount_001",
+        "providerPaymentId": "pay_000005",
+        "currency": "ZAR",
+        "amountMinor": 9500,
+        "evidence": {
+          "orderAmountMinor": 10000,
+          "orderCurrency": "ZAR",
+          "paymentAmountMinor": 9500,
+          "paymentCurrency": "ZAR",
+          "amountMismatch": true,
+          "currencyMismatch": false
+        }
+      },
+      {
+        "findingKey": "ffe89bac1ba5448ec678ad025816c4e2",
+        "mismatchClass": "DUPLICATE_SUCCESSFUL_PAYMENT",
+        "severity": "CRITICAL",
+        "orderReference": "ord_duplicate_001",
+        "providerPaymentId": "pay_000003",
+        "currency": "ZAR",
+        "amountMinor": 19800,
+        "evidence": {
+          "paymentIds": [
+            "pay_000003",
+            "pay_000004"
+          ],
+          "count": 2,
+          "perPaymentAmountsMinor": [
+            9900,
+            9900
+          ]
+        }
+      },
+      {
+        "findingKey": "9373727679e21bb7b9d2467f8a63f499",
+        "mismatchClass": "SUCCESSFUL_PAYMENT_NOT_CONFIRMED",
+        "severity": "CRITICAL",
+        "orderReference": "ord_lost_webhook_001",
+        "providerPaymentId": "pay_000002",
+        "currency": "ZAR",
+        "amountMinor": 22000,
+        "evidence": {
+          "orderBookingStatus": "PAYMENT_PENDING",
+          "paymentStatus": "successful",
+          "paymentUpdatedAt": "2025-12-31T21:00:00.000Z"
+        }
+      },
+      {
+        "findingKey": "759caec927cd1af826602f2b840398e7",
+        "mismatchClass": "WEBHOOK_PROVIDER_DISAGREEMENT",
+        "severity": "CRITICAL",
+        "orderReference": "ord_webhook_disagreement_001",
+        "providerPaymentId": "pay_000007",
+        "currency": "ZAR",
+        "amountMinor": 13500,
+        "evidence": {
+          "webhookEventId": "evt_webhook_disagreement_fixed",
+          "webhookClaimedStatus": "successful",
+          "providerCurrentStatus": "failed",
+          "webhookReceivedAt": "2025-12-31T21:00:00.000Z"
+        }
+      }
+    ]
+  }
+}
