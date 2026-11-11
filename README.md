@@ -7,6 +7,49 @@ between a business's own bookings and a payment provider's records.
 client data, and does not integrate with any real payment provider or
 external account. It is not production software.
 
+## Demo walkthrough
+
+Real screenshots from the running local app, using only the synthetic
+fixtures in `shared/fixtures/demo-scenarios.json`. Click an image to inspect
+its full-size evidence and controls.
+
+### Findings and evidence
+
+The findings view shows the six mismatch classes across seven findings,
+with severity, order/payment references, amounts, per-run evidence, and
+Acknowledge / Resolve controls. Status changes annotate findings only;
+they do not change bookings or payments.
+
+![RECON findings with synthetic mismatch evidence and lifecycle controls](https://github.com/user-attachments/assets/8d22f80b-ada0-4895-8b83-023a606629c8)
+
+### Browser-triggered reconciliation and run history
+
+The run history shows a successful browser-triggered run, the complete
+seven-finding demo run, and a deliberately `INCONCLUSIVE` run. The partial
+export declares eight payments but returns seven, so absence-based
+findings are suppressed instead of treating missing records as proof.
+The browser-triggered run uses the normal grace period; the seeded demo
+uses zero grace to exercise every scenario immediately.
+
+![RECON run history with SUCCESS and INCONCLUSIVE outcomes and the reconciliation button](https://github.com/user-attachments/assets/78011fd5-01b1-4fac-877c-e2c0062baeaf)
+
+### Verified demo output
+
+`npm run demo` checked all eight scenarios against their expected findings:
+clean and refunded payments produced no mismatch; lost webhook, duplicate
+payment, wrong amount, confirmed-without-payment, aged pending, and
+webhook/provider disagreement produced the expected findings.
+
+```text
+Run: status=SUCCESS, findings=7
+All scenarios matched expected findings.
+Incomplete-export run: status=INCONCLUSIVE (expected INCONCLUSIVE)
+```
+
+Run IDs and timestamps vary. These captures show a local demo, not a
+hosted service or a real payment-provider integration. To reproduce it,
+follow [Running the demo](#running-the-demo) below.
+
 ## Why webhook logs alone don't prove money correctness
 
 A webhook is a message someone sent you, not a receipt you fetched
