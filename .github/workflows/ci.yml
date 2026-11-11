@@ -100,6 +100,15 @@ jobs:
             sleep 2
           done
 
+          echo "Waiting for the entrypoint's own internal demo run to finish, so our own run below doesn't race it against the same database..."
+          for i in $(seq 1 60); do
+            if docker compose -f docker-compose.yml -f docker-compose.ci.yml logs app 2>/dev/null | grep -q "app is running"; then
+              echo "entrypoint's internal demo run has finished"
+              break
+            fi
+            sleep 2
+          done
+
           echo "Running the real demo inside the app container (asserts every scenario's expected findings and the incomplete-export -> INCONCLUSIVE behavior; a non-zero exit here fails this step)..."
           docker compose -f docker-compose.yml -f docker-compose.ci.yml exec -T app npx tsx scripts/demo.ts
 
