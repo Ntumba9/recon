@@ -75,5 +75,9 @@
       "webhookOverrideStatus": "successful",
       "expectedFindingClasses": ["CONFIRMED_WITHOUT_SUCCESSFUL_PAYMENT", "WEBHOOK_PROVIDER_DISAGREEMENT"]
     }
-  ]
+  ],
+  "truncationDemo": {
+    "description": "Run separately from the scenarios above: with the mock provider's /dev/simulate-truncation turned on, its declared total disagrees with what pagination actually returns, so the whole run must come back INCONCLUSIVE - and must not report CONFIRMED_WITHOUT_SUCCESSFUL_PAYMENT or AGED_PENDING_BOOKING for anything, since absence can no longer be trusted.",
+    "expectedRunStatus": "INCONCLUSIVE"
+  }
 }

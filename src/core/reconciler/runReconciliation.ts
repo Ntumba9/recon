@@ -32,6 +32,7 @@ async function loadOrders(prisma: PrismaClient): Promise<OrderRecord[]> {
     amountMinor: o.amountMinor,
     bookingStatus: o.bookingStatus,
     createdAt: o.createdAt,
+    updatedAt: o.updatedAt,
   }));
 }
 
@@ -73,9 +74,9 @@ export async function runReconciliation(opts: RunReconciliationOptions): Promise
     },
   });
 
-  let payments;
+  let listResult;
   try {
-    payments = await adapter.listAllPayments({ from: windowStart, to: windowEnd });
+    listResult = await adapter.listAllPayments({ from: windowStart, to: windowEnd });
   } catch (err) {
     const message = err instanceof ProviderUnavailableError ? err.message : `Unexpected error: ${(err as Error).message}`;
     logger.error("reconciliation run failed: provider unavailable", { runId: run.id, message });
@@ -86,16 +87,17 @@ export async function runReconciliation(opts: RunReconciliationOptions): Promise
     return { runId: run.id, status: "FAILED", findings: [], notes: message };
   }
 
+  const { payments, complete, incompleteReason } = listResult;
   const [orders, webhookEvents] = await Promise.all([loadOrders(prisma), loadWebhookEvents(prisma)]);
 
-  const ctx: ReconcileContext = { orders, payments, webhookEvents, now, gracePeriodMs };
+  const ctx: ReconcileContext = { orders, payments, webhookEvents, now, gracePeriodMs, complete };
   const result = reconcile(ctx);
 
-  await persistFindings(prisma, run.id, result.findings);
+  await persistFindings(prisma, run.id, result.findings, result.status === "SUCCESS");
 
   await prisma.reconciliationRun.update({
     where: { id: run.id },
-    data: { status: result.status, finishedAt: new Date() },
+    data: { status: result.status, finishedAt: new Date(), notes: incompleteReason ?? result.notes },
   });
 
   logger.info("reconciliation run completed", { runId: run.id, findingCount: result.findings.length });
@@ -107,28 +109,54 @@ export async function runReconciliation(opts: RunReconciliationOptions): Promise
  * Upserts each finding's stable FindingRecord and records this run's
  * evidence as a FindingOccurrence, inside one transaction per finding so a
  * partial write never leaves a record without its occurrence.
+ *
+ * When `allowStatusTransitions` is true (a SUCCESS run only - never an
+ * INCONCLUSIVE or FAILED one), a RESOLVED finding whose discrepancy recurs
+ * is reopened automatically. An incomplete run still records the
+ * occurrence for whatever presence-based findings it did produce, but must
+ * never touch a FindingRecord's lifecycle status.
  */
-async function persistFindings(prisma: PrismaClient, runId: string, findings: Finding[]): Promise<void> {
+async function persistFindings(
+  prisma: PrismaClient,
+  runId: string,
+  findings: Finding[],
+  allowStatusTransitions: boolean
+): Promise<void> {
   for (const finding of findings) {
     await prisma.$transaction(async (tx) => {
-      const record = await tx.findingRecord.upsert({
-        where: { findingKey: finding.findingKey },
-        create: {
+      const existing = await tx.findingRecord.findUnique({ where: { findingKey: finding.findingKey } });
+
+      const shouldReopen = allowStatusTransitions && existing?.status === "RESOLVED";
+
+      const record = existing
+        ? await tx.findingRecord.update({
+            where: { id: existing.id },
+            data: {
+              lastSeenRunId: runId,
+              currency: finding.currency,
+              amountMinor: finding.amountMinor,
+              ...(shouldReopen ? { status: "OPEN" as const, statusChangedAt: new Date() } : {}),
+            },
+          })
+        : await tx.findingRecord.create({
+            data: {
+              findingKey: finding.findingKey,
+              mismatchClass: finding.mismatchClass,
+              orderReference: finding.orderReference,
+              providerPaymentId: finding.providerPaymentId,
+              currency: finding.currency,
+              amountMinor: finding.amountMinor,
+              firstSeenRunId: runId,
+              lastSeenRunId: runId,
+            },
+          });
+
+      if (shouldReopen) {
+        logger.info("finding reopened: resolved discrepancy recurred", {
+          runId,
           findingKey: finding.findingKey,
-          mismatchClass: finding.mismatchClass,
-          orderReference: finding.orderReference,
-          providerPaymentId: finding.providerPaymentId,
-          currency: finding.currency,
-          amountMinor: finding.amountMinor,
-          firstSeenRunId: runId,
-          lastSeenRunId: runId,
-        },
-        update: {
-          lastSeenRunId: runId,
-          currency: finding.currency,
-          amountMinor: finding.amountMinor,
-        },
-      });
+        });
+      }
 
       await tx.findingOccurrence.upsert({
         where: { findingRecordId_runId: { findingRecordId: record.id, runId } },

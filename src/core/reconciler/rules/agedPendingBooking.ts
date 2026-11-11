@@ -1,8 +1,15 @@
 import { buildFindingKey } from "../findingKey";
 import type { Finding, ReconcileContext } from "../types";
 
-/** A PENDING/PAYMENT_PENDING booking that has aged well past the grace period with no provider payment at all - flagged for investigation, never auto-cancelled. */
+/**
+ * A PENDING/PAYMENT_PENDING booking that has aged well past the grace period
+ * with no provider payment at all - flagged for investigation, never
+ * auto-cancelled. Relies on absence, so it never fires against an
+ * incomplete provider export.
+ */
 export function agedPendingBooking(ctx: ReconcileContext): Finding[] {
+  if (!ctx.complete) return [];
+
   const findings: Finding[] = [];
   const hasAnyPaymentByOrder = new Set(ctx.payments.map((p) => p.orderReference));
 

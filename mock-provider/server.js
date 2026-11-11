@@ -91,6 +91,13 @@ app.post("/dev/reset", (_req, res) => {
   res.json({ ok: true });
 });
 
+/** Turns truncated-export simulation on or off: POST { active: boolean, extraCount?: number }. */
+app.post("/dev/simulate-truncation", (req, res) => {
+  const { active, extraCount } = req.body || {};
+  store.setSimulateTruncation(Boolean(active), extraCount);
+  res.json({ ok: true, active: store.isSimulatingTruncation() });
+});
+
 /**
  * Seeds the provider's own store from the shared demo scenarios and, for
  * scenarios marked deliverWebhooks, pushes a webhook to the app - except

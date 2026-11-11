@@ -21,15 +21,26 @@ interface Scenario {
   expectedFindingClasses: string[];
 }
 
-function loadScenarios(): Scenario[] {
+function loadFixture(): { scenarios: Scenario[]; truncationDemo: { description: string; expectedRunStatus: string } } {
   const fixturePath = path.join(__dirname, "..", "shared", "fixtures", "demo-scenarios.json");
-  return JSON.parse(fs.readFileSync(fixturePath, "utf8")).scenarios;
+  return JSON.parse(fs.readFileSync(fixturePath, "utf8"));
 }
 
 async function seedMockProvider(): Promise<void> {
   const res = await fetch(new URL("/dev/seed", MOCK_PROVIDER_URL), { method: "POST" });
   if (!res.ok) {
     throw new Error(`Failed to seed mock provider: HTTP ${res.status}`);
+  }
+}
+
+async function setSimulateTruncation(active: boolean): Promise<void> {
+  const res = await fetch(new URL("/dev/simulate-truncation", MOCK_PROVIDER_URL), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ active }),
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to set truncation simulation: HTTP ${res.status}`);
   }
 }
 
@@ -59,7 +70,7 @@ async function main() {
 
     console.log(`   Run ${result.runId}: status=${result.status}, findings=${result.findings.length}\n`);
 
-    const scenarios = loadScenarios();
+    const { scenarios, truncationDemo } = loadFixture();
     const actualByOrder = new Map<string, Set<string>>();
     for (const finding of result.findings) {
       if (!finding.orderReference) continue;
@@ -87,7 +98,28 @@ async function main() {
     console.log("-".repeat(90));
     console.log(allMatched ? "All scenarios matched expected findings." : "Some scenarios did NOT match expected findings.");
 
-    if (!allMatched) process.exitCode = 1;
+    console.log("\n4. Demonstrating an incomplete provider export...");
+    console.log(`   ${truncationDemo.description}`);
+    await setSimulateTruncation(true);
+    let truncationOk = false;
+    try {
+      const truncatedResult = await runReconciliation({
+        prisma,
+        adapter,
+        windowStart,
+        windowEnd,
+        gracePeriodMs: 0,
+      });
+      truncationOk = truncatedResult.status === truncationDemo.expectedRunStatus;
+      console.log(
+        `   Run ${truncatedResult.runId}: status=${truncatedResult.status} (expected ${truncationDemo.expectedRunStatus})` +
+          (truncationOk ? "" : "  <-- MISMATCH")
+      );
+    } finally {
+      await setSimulateTruncation(false);
+    }
+
+    if (!allMatched || !truncationOk) process.exitCode = 1;
   } finally {
     await prisma.$disconnect();
   }
