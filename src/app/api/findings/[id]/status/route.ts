@@ -8,6 +8,11 @@ import { statusTransitionSchema } from "@/core/findings/statusTransitionSchema";
  * This endpoint annotates the FindingRecord only - it never writes to
  * Order or any payment data, and it performs no automatic action
  * (no refund, retry, or booking correction).
+ *
+ * Note contract (see src/core/findings/statusTransitionSchema.ts):
+ *  - "note" absent from the body -> the existing note is preserved as-is.
+ *  - "note": null, or "" after trimming -> the note is explicitly cleared.
+ *  - "note": "<text>" -> the note is replaced with the trimmed text.
  */
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const requestId = newRequestId();
@@ -30,11 +35,18 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     return NextResponse.json({ error: "not_found", requestId }, { status: 404 });
   }
 
+  const noteFieldPresent = typeof parsedJson === "object" && parsedJson !== null && "note" in parsedJson;
+  const nextNote = !noteFieldPresent
+    ? existing.note
+    : parsed.data.note === null || parsed.data.note === ""
+      ? null
+      : (parsed.data.note ?? null);
+
   const updated = await prisma.findingRecord.update({
     where: { id },
     data: {
       status: parsed.data.status,
-      note: parsed.data.note ?? null,
+      note: nextNote,
       statusChangedAt: new Date(),
     },
   });

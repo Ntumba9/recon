@@ -62,11 +62,11 @@ only over HTTP) - nothing lets one silently stand in for the other.
 - **JavaScript** (`mock-provider/`) - a plain Node/Express simulator of a
   payment provider's HTTP API and webhook delivery, with its own in-memory
   store. It is a mock contract, not an integration with any real provider.
-- **Python** (future, not built yet) - an offline CLI that compares an
-  orders CSV against a provider settlement CSV using the same mismatch
-  classes. `shared/mismatch-schema.json` and `shared/fixtures/` define that
-  contract now so the Python port can be tested against the exact same
-  scenarios and expected findings as the TypeScript engine.
+- **Python** (`python-cli/`) - an offline, standard-library-only CLI that
+  compares an orders CSV against a provider settlement CSV using the same
+  six mismatch classes. Checked for parity against the TypeScript engine
+  field-by-field (not just finding-class counts) against one frozen golden
+  fixture - see `python-cli/README.md` and "Reconciliation runs" below.
 
 ## Mismatch classes
 
@@ -96,6 +96,33 @@ A run's `status` is `SUCCESS`, `INCONCLUSIVE`, or `FAILED`:
 
 The mock provider can simulate a partial export on demand: `POST /dev/simulate-truncation` with `{ "active": true }` makes every `/payments` page declare a `total` higher than what pagination will ever return. `scripts/demo.ts` exercises this as its own step, separate from the main scenario table, so the two don't get confused with each other.
 
+## Reconciliation runs
+
+A run can be started from the browser, not only from the demo script:
+
+- **`/runs`** lists every `ReconciliationRun` - window, status, completeness,
+  note count, and finding count - newest first, and links back to
+  `/findings`. `/findings` links to `/runs` too.
+- **"Run reconciliation"** on that page calls `POST /api/runs`, which runs
+  the exact same reconciler the demo script and the Python CLI are checked
+  against. Loading, error, and result states are all shown as they actually
+  are: a `FAILED` or `INCONCLUSIVE` result is never hidden or rephrased as
+  success.
+- **Default window**: when no window is given, the window is derived from
+  the oldest scenario in `shared/fixtures/demo-scenarios.json` plus a fixed
+  safety margin (`src/core/reconciler/defaultWindow.ts`) - not an arbitrary
+  constant. `scripts/demo.ts` uses this same function, so the two can't
+  disagree about what "the default window" means.
+- **Preventing duplicate/concurrent runs**: the button disables itself while
+  a request is in flight, and the server independently refuses a second
+  concurrent trigger with `409 run_in_progress` (an in-process flag closes
+  the common double-click race; a database check against any run with no
+  `finishedAt` closes it across processes/restarts too, with a 5-minute
+  staleness timeout so one abandoned run can't block new runs forever - see
+  `src/app/api/runs/route.ts`).
+- **No authentication**, same as every other route in this demo - see
+  "Honest limits".
+
 ## Finding lifecycle
 
 Every `FindingRecord` carries a `status` - `OPEN`, `ACKNOWLEDGED`, or
@@ -105,13 +132,19 @@ annotate the finding only; nothing in the lifecycle ever writes to an
 correction anywhere in RECON.
 
 - **Changing status**: `POST /api/findings/:id/status` with a JSON body
-  `{ "status": "ACKNOWLEDGED" | "RESOLVED" | "OPEN", "note"?: string }`.
+  `{ "status": "ACKNOWLEDGED" | "RESOLVED" | "OPEN", "note"?: string | null }`.
   The payload is validated (`src/core/findings/statusTransitionSchema.ts`)
   and the status must be one of the three values above.
+- **Note contract**: omitting `note` from the body preserves the finding's
+  existing note untouched; `"note": null` or `"note": ""` (empty after
+  trimming) explicitly clears it; `"note": "<text>"` replaces it. The
+  findings page's note field is prefilled with the current note, so leaving
+  it as-is and clicking a status button preserves it, and a "Clear note"
+  button sends the explicit-clear form without changing status.
 - **On the findings page**: a status filter alongside the existing
   mismatch-class and severity filters, the current status and note shown
-  per row, and action buttons (Acknowledge / Resolve / Reopen) that call
-  the endpoint above.
+  per row, and action buttons (Acknowledge / Resolve / Reopen / Clear note)
+  that call the endpoint above.
 - **Reopening**: if a `RESOLVED` finding's discrepancy is detected again in
   a later `SUCCESS` run, it's automatically set back to `OPEN` and the new
   occurrence is recorded - a resolved issue that comes back isn't silently
@@ -138,16 +171,27 @@ correction anywhere in RECON.
   booking-confirmation update happen in one transaction; either both
   commit or neither does.
 - **Out of scope for this demo**: the findings UI has no authentication
-  (see Limits below), there is no rate limiting on the webhook endpoint or
-  the finding-status endpoint, and the mock provider has no analogous
-  protections of its own since it represents a third party RECON doesn't
-  control.
+  (see Limits below), there is no rate limiting on the webhook endpoint, the
+  finding-status endpoint, or the run-trigger endpoint, and the mock
+  provider has no analogous protections of its own since it represents a
+  third party RECON doesn't control.
 
 ## Honest limits
 
-- **Unauthenticated, local-only demo.** The findings page, the webhook
-  endpoint, and the finding-status endpoint all have no auth. This is
-  explicitly not meant to run anywhere but a local machine for this demo.
+- **Unauthenticated, local-only demo.** The findings page, the runs page,
+  the webhook endpoint, the finding-status endpoint, and the run-trigger
+  endpoint all have no auth. This is explicitly not meant to run anywhere
+  but a local machine for this demo.
+- **Run concurrency is best-effort.** The in-process flag and database
+  check that prevent overlapping runs (see "Reconciliation runs") cover a
+  double-click and a crashed/restarted process, but a run started by a
+  genuinely different process within the 5-minute staleness window can
+  still race past both guards in principle - acceptable for a single-user
+  local demo, not a production concurrency control.
+- **The Python CLI can't detect an incomplete export on its own.** A static
+  CSV file has no live pagination to double-check against, so completeness
+  must be declared (`--declared-total` or `--mark-incomplete`); with
+  neither flag, the run is treated as complete. See `python-cli/README.md`.
 - **No automated remediation.** RECON never issues refunds, retries
   charges, or changes a booking on its own. Every finding is for a human
   to act on, including every lifecycle status change.
@@ -178,6 +222,7 @@ mock provider and runs a second reconciliation to show it come back
 `INCONCLUSIVE` - all to the `app` container's logs. Once it's up:
 
 - Findings UI: http://localhost:3005/findings (mapped from the container's port 3000; change the host-side port in `docker-compose.yml` if 3005 is also taken)
+- Run history / trigger a run: http://localhost:3005/runs
 - Mock provider health check: http://localhost:4000/health
 
 ### Running without Docker
@@ -201,12 +246,21 @@ npm run lint
 npm run secret-scan
 ```
 
+Python CLI tests (standard library `unittest`, no install step):
+
+```bash
+cd python-cli
+python -m unittest discover -s tests -v
+```
+
+CI also runs a bounded Docker Compose smoke test: `docker compose up --build`
+for real, against the actual containers, asserting the same expected-vs-
+actual scenario table and incomplete-export behavior `scripts/demo.ts`
+prints locally (see `.github/workflows/ci.yml`), with logs collected on
+failure and the stack always torn down afterward.
+
 ## Growth (structure in place, not built)
 
-- **Python CSV CLI** - an offline tool comparing an orders CSV with a
-  provider settlement CSV against `shared/mismatch-schema.json` and the
-  golden fixtures in `shared/fixtures/`, for byte-for-byte parity testing
-  with the TypeScript engine.
 - **Findings digest email** - a periodic summary of open findings.
 - **Scheduled runs** - running the reconciler on a timer instead of on
   demand.
