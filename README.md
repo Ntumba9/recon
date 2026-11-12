@@ -1,5 +1,7 @@
 # RECON
 
+[![CI](https://github.com/Ntumba9/recon/actions/workflows/ci.yml/badge.svg)](https://github.com/Ntumba9/recon/actions/workflows/ci.yml)
+
 A local-first, free payment-reconciliation tool that finds discrepancies
 between a business's own bookings and a payment provider's records.
 
@@ -32,6 +34,39 @@ The browser-triggered run uses the normal grace period; the seeded demo
 uses zero grace to exercise every scenario immediately.
 
 ![RECON run history with SUCCESS and INCONCLUSIVE outcomes and the reconciliation button](https://github.com/user-attachments/assets/78011fd5-01b1-4fac-877c-e2c0062baeaf)
+
+### Finding lifecycle: acknowledge, resolve, and notes
+
+Status changes are deliberate human actions with an investigation note -
+nothing is ever auto-resolved, and no status change touches a booking or a
+payment. Here the duplicate-payment finding is acknowledged with what the
+provider export showed, the confirmed-without-payment finding is resolved
+after manual correction, and the rest stay open. If a later successful run
+detects a resolved finding's discrepancy again, it is set back to OPEN
+automatically.
+
+![RECON findings showing ACKNOWLEDGED and RESOLVED lifecycle states with investigation notes](https://github.com/user-attachments/assets/6e9fa8f7-85d9-4426-bd22-26a72b9850a1)
+
+### Isolating one mismatch class
+
+Class, severity and status filters keep the evidence readable. Here the
+class filter isolates `WEBHOOK_PROVIDER_DISAGREEMENT`: the webhook claimed
+`successful`, but the provider's own current record says `failed`. The
+finding reports that disagreement rather than trusting the webhook.
+
+![RECON findings filtered to WEBHOOK_PROVIDER_DISAGREEMENT, evidence showing claimed successful versus provider-recorded failed](https://github.com/user-attachments/assets/21c8a01a-3936-4601-8149-187d7cd4ac51)
+
+### Offline parity with the Python CLI
+
+The standard-library-only Python CLI reconciles CSV exports of the same
+eight demo scenarios and returns the same seven findings - same mismatch
+classes, orders, payments and amounts - as the TypeScript engine above.
+Both implementations are checked field-by-field, including the
+cryptographic `findingKey`, against one frozen golden fixture
+(`shared/fixtures/golden-findings.json`), so this agreement is enforced in
+CI, not just observed once.
+
+![RECON Python CLI output matching the web engine's seven findings on the same scenarios](https://github.com/user-attachments/assets/553ef7ba-b955-4d37-bd0a-a2bda3d645f8)
 
 ### Verified demo output
 
