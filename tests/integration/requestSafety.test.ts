@@ -217,21 +217,22 @@ describe("request safety", () => {
     it("never echoes the signature header, a stack trace, or a raw Prisma error message back in a webhook error response", async () => {
       const payload = { eventId: `evt_safety_leak_${Date.now()}`, type: "payment.succeeded", paymentId: "pay_leak", orderReference: null, amountMinor: 100, currency: "ZAR", status: "successful", createdAt: new Date().toISOString() };
       const rawBody = JSON.stringify(payload);
-      const secretLookingSignature = "t=1,v1=sig_should_never_appear_in_any_response_field";
+      const wrongSignature = sign(rawBody, "a-secret-that-should-never-appear-in-any-response-field");
       const req = new NextRequest("http://localhost/api/webhooks/provider", {
         method: "POST",
-        headers: { "x-mock-signature": secretLookingSignature },
+        headers: { "x-mock-signature": wrongSignature },
         body: rawBody,
       });
       const res = await postWebhook(req);
       const text = await res.text();
       expect(res.status).toBe(400);
-      expect(text).not.toContain(secretLookingSignature);
+      expect(text).not.toContain(wrongSignature);
       expect(text).not.toContain("at Object.<anonymous>");
       expect(text).not.toContain("node_modules");
       expect(text.toLowerCase()).not.toContain("prisma");
       const body = JSON.parse(text);
-      expect(Object.keys(body).sort()).toEqual(["error", "requestId"]);
+      expect(Object.keys(body).sort()).toEqual(["error", "message", "requestId"]);
+      expect(body.message).not.toContain(wrongSignature);
     });
   });
 });
