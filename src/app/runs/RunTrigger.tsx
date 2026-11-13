@@ -53,15 +53,21 @@ export function RunTrigger({ initialDisabled }: { initialDisabled: boolean }) {
 
   return (
     <div style={{ marginBottom: 24 }}>
-      <button type="button" disabled={pending || initialDisabled} onClick={trigger}>
+      <button type="button" disabled={pending || initialDisabled} onClick={trigger} aria-busy={pending}>
         {pending ? "Running..." : "Run reconciliation"}
       </button>
       {initialDisabled && !pending && !result && (
-        <p style={{ color: "#555", marginTop: 8 }}>A run is already in progress - refresh to check.</p>
+        <p className="feedback" role="status">
+          A run is already in progress - refresh to check.
+        </p>
       )}
-      {error && <p style={{ color: "crimson", marginTop: 8 }}>{error}</p>}
+      {error && (
+        <p className="feedback feedback-error" role="alert">
+          {error}
+        </p>
+      )}
       {result && (
-        <p style={{ marginTop: 8 }}>
+        <p className="feedback feedback-success" role="status">
           Run finished: <strong>{result.status}</strong> - {result.findingCount} finding(s)
           {result.notes ? ` (${result.notes})` : ""}
         </p>

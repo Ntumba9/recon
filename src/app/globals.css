@@ -1,0 +1,321 @@
+/* Shared styles for RECON's pages, replacing the inline styles that used
+   to be repeated on every element. Kept intentionally small and plain -
+   this is a demo app, not a design system. */
+
+:root {
+  --color-bg: #f7f7f8;
+  --color-text: #1a1a1a;
+  --color-muted: #555555;
+  --color-border: #dddddd;
+  --color-border-light: #eeeeee;
+  --color-surface: #ffffff;
+  --color-link: #0b5fff;
+  --color-error: #b3261e;
+  --color-success: #0f6b3c;
+  --color-focus: #0b5fff;
+
+  --severity-critical-bg: #fbe4e4;
+  --severity-critical-fg: #8a1f1f;
+  --severity-warning-bg: #fff2d9;
+  --severity-warning-fg: #7a4e00;
+  --severity-info-bg: #e6eefc;
+  --severity-info-fg: #1d3f8a;
+
+  --status-open-bg: #eef0f2;
+  --status-open-fg: #33383d;
+  --status-acknowledged-bg: #fff2d9;
+  --status-acknowledged-fg: #7a4e00;
+  --status-resolved-bg: #e3f3ea;
+  --status-resolved-fg: #0f6b3c;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: system-ui, sans-serif;
+  background: var(--color-bg);
+  color: var(--color-text);
+  line-height: 1.4;
+}
+
+/* Visible focus for every interactive element, keyboard or mouse - never
+   suppressed. */
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+summary:focus-visible {
+  outline: 3px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.page {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: var(--space-8) var(--space-4);
+}
+
+.page-intro {
+  color: var(--color-muted);
+  margin-top: 0;
+}
+
+.page-nav {
+  margin: 0 0 var(--space-4);
+}
+
+h1 {
+  margin-bottom: var(--space-1);
+}
+
+/* Summary strip: a row of counts, each a labelled figure. */
+.summary-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  margin-bottom: var(--space-6);
+}
+
+.summary-stat {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-light);
+  border-radius: 6px;
+  padding: var(--space-3) var(--space-4);
+  min-width: 120px;
+}
+
+.summary-stat dt {
+  font-size: 12px;
+  color: var(--color-muted);
+  margin: 0;
+}
+
+.summary-stat dd {
+  font-size: 24px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.summary-stat.is-critical dd {
+  color: var(--severity-critical-fg);
+}
+
+/* Filter form */
+.filter-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: var(--space-4);
+  margin-bottom: var(--space-6);
+}
+
+.filter-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: 14px;
+}
+
+.filter-field label {
+  font-weight: 600;
+}
+
+.filter-actions {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+/* Table */
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--color-surface);
+}
+
+.data-table th {
+  text-align: left;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 2px solid var(--color-border);
+  font-size: 13px;
+}
+
+.data-table td {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border-light);
+  vertical-align: top;
+}
+
+.detail-row td {
+  background: #fbfbfc;
+  padding: var(--space-4);
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--space-1) var(--space-3);
+  font-size: 13px;
+  margin: 0 0 var(--space-4);
+}
+
+.detail-grid dt {
+  color: var(--color-muted);
+}
+
+.detail-grid dd {
+  margin: 0;
+}
+
+/* Badges: color is always paired with text, never the only signal. */
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.badge-critical {
+  background: var(--severity-critical-bg);
+  color: var(--severity-critical-fg);
+}
+
+.badge-warning {
+  background: var(--severity-warning-bg);
+  color: var(--severity-warning-fg);
+}
+
+.badge-info {
+  background: var(--severity-info-bg);
+  color: var(--severity-info-fg);
+}
+
+.badge-open {
+  background: var(--status-open-bg);
+  color: var(--status-open-fg);
+}
+
+.badge-acknowledged {
+  background: var(--status-acknowledged-bg);
+  color: var(--status-acknowledged-fg);
+}
+
+.badge-resolved {
+  background: var(--status-resolved-bg);
+  color: var(--status-resolved-fg);
+}
+
+/* Forms and buttons */
+.field-label {
+  font-size: 12px;
+  font-weight: 600;
+  display: block;
+  margin-bottom: var(--space-1);
+}
+
+.text-input {
+  font-size: 13px;
+  padding: 6px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  width: 100%;
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.button-row {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-top: var(--space-2);
+}
+
+.feedback {
+  margin: var(--space-2) 0 0;
+  font-size: 13px;
+}
+
+.feedback-error {
+  color: var(--color-error);
+}
+
+.feedback-success {
+  color: var(--color-success);
+}
+
+.empty-state {
+  margin-top: var(--space-6);
+  color: var(--color-muted);
+}
+
+.pagination {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  margin-top: var(--space-4);
+  font-size: 14px;
+}
+
+/* Phone-width layout: filters and the summary strip stack instead of
+   overflowing, and the table scrolls horizontally within its own box
+   rather than squeezing the page. */
+@media (max-width: 480px) {
+  .page {
+    padding: var(--space-4) var(--space-3);
+  }
+
+  .filter-form {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .summary-strip {
+    gap: var(--space-2);
+  }
+
+  .summary-stat {
+    min-width: 0;
+    flex: 1 1 40%;
+  }
+
+  .table-scroll {
+    overflow-x: auto;
+  }
+}

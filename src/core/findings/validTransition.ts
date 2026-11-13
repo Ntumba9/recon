@@ -1,6 +1,6 @@
 export type FindingStatusValue = "OPEN" | "ACKNOWLEDGED" | "RESOLVED";
 
-/** The lifecycle a human can drive through the status endpoint - the same shape the findings page's action buttons already expose (src/app/findings/FindingActions.tsx). */
+/** The lifecycle a human can drive through the status endpoint - the same shape the findings page's action buttons already expose (src/app/findings/FindingRow.tsx). */
 const ALLOWED_NEXT_STATUSES: Record<FindingStatusValue, readonly FindingStatusValue[]> = {
   OPEN: ["ACKNOWLEDGED", "RESOLVED"],
   ACKNOWLEDGED: ["RESOLVED", "OPEN"],
