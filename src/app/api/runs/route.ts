@@ -3,6 +3,8 @@ import { getConfig } from "@/lib/config";
 import { prisma } from "@/lib/db";
 import { newRequestId } from "@/lib/errors";
 import { logger } from "@/lib/logger";
+import { apiError } from "@/lib/apiError";
+import { MAX_BODY_BYTES, hasJsonContentType, isAllowedOrigin, readBodyWithLimit } from "@/lib/httpGuards";
 import { MockProviderAdapter } from "@/core/provider-adapter/mockProviderAdapter";
 import { computeDefaultWindow } from "@/core/reconciler/defaultWindow";
 import { runReconciliation } from "@/core/reconciler/runReconciliation";
@@ -31,33 +33,52 @@ let runInFlight = false;
  * unauthenticated, local-only posture as every other route in this demo
  * (see README "Honest limits") - and it never touches an Order or payment
  * beyond what the reconciler itself already does; it only starts a run.
+ *
+ * Error shape: every failure is { error, message, requestId } (see
+ * src/lib/apiError.ts) - invalid_json/invalid_body (400), run_in_progress
+ * (409), payload_too_large (413), unsupported_media_type (415),
+ * forbidden_origin (403).
  */
 export async function POST(req: NextRequest) {
   const requestId = newRequestId();
+
+  if (!isAllowedOrigin(req)) {
+    return apiError("forbidden_origin", "Request Origin does not match this host.", requestId);
+  }
 
   // Checked and set back-to-back, with no `await` in between, so two
   // requests arriving in the same process can't both pass the check before
   // either sets the flag - that gap is exactly what let a fast double-click
   // slip through an earlier version of this guard.
   if (runInFlight) {
-    return NextResponse.json({ error: "run_in_progress", requestId }, { status: 409 });
+    return apiError("run_in_progress", "A reconciliation run is already in progress.", requestId);
   }
   runInFlight = true;
 
   try {
+    const bodyResult = await readBodyWithLimit(req);
+    if (!bodyResult.ok) {
+      return apiError("payload_too_large", `Request body exceeds ${MAX_BODY_BYTES} bytes.`, requestId);
+    }
+    const rawBody = bodyResult.raw;
+
+    if (!hasJsonContentType(req, rawBody)) {
+      return apiError("unsupported_media_type", "Content-Type must be application/json.", requestId);
+    }
+
     let parsedJson: unknown = {};
-    const rawBody = await req.text();
     if (rawBody.trim().length > 0) {
       try {
         parsedJson = JSON.parse(rawBody);
       } catch {
-        return NextResponse.json({ error: "invalid_json", requestId }, { status: 400 });
+        return apiError("invalid_json", "Request body is not valid JSON.", requestId);
       }
     }
 
     const parsed = triggerRunSchema.safeParse(parsedJson);
     if (!parsed.success) {
-      return NextResponse.json({ error: "invalid_payload", issues: parsed.error.issues, requestId }, { status: 400 });
+      const message = parsed.error.issues.map((i) => i.message).join("; ") || "Invalid request body.";
+      return apiError("invalid_body", message, requestId);
     }
 
     const inProgressRun = await prisma.reconciliationRun.findFirst({
@@ -67,7 +88,7 @@ export async function POST(req: NextRequest) {
     if (inProgressRun) {
       const ageMs = Date.now() - inProgressRun.startedAt.getTime();
       if (ageMs < STALE_RUN_THRESHOLD_MS) {
-        return NextResponse.json({ error: "run_in_progress", runId: inProgressRun.id, requestId }, { status: 409 });
+        return apiError("run_in_progress", "A reconciliation run is already in progress.", requestId);
       }
       logger.warn("abandoning stale in-progress run before starting a new one", { requestId, runId: inProgressRun.id, ageMs });
       await prisma.reconciliationRun.update({
@@ -101,7 +122,7 @@ export async function POST(req: NextRequest) {
     });
   } catch (err) {
     logger.error("run trigger failed unexpectedly", { requestId, message: (err as Error).message });
-    return NextResponse.json({ error: "internal_error", requestId }, { status: 500 });
+    return apiError("internal_error", "The run could not be completed.", requestId);
   } finally {
     runInFlight = false;
   }

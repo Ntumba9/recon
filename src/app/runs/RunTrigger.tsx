@@ -28,13 +28,17 @@ export function RunTrigger({ initialDisabled }: { initialDisabled: boolean }) {
     setError(null);
     setResult(null);
     try {
-      const res = await fetch("/api/runs", { method: "POST" });
+      const res = await fetch("/api/runs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      });
       const data = await res.json();
       if (!res.ok) {
         setError(
           data.error === "run_in_progress"
             ? "A reconciliation run is already in progress. Try again once it finishes."
-            : `Could not start the run (${data.error ?? res.status}).`
+            : (data.message ?? `Could not start the run (${data.error ?? res.status}).`)
         );
         return;
       }
