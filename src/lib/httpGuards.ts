@@ -47,12 +47,20 @@ export async function readBodyWithLimit(req: NextRequest, maxBytes: number = MAX
  * stops a cross-origin browser page from driving these endpoints with the
  * browser's ambient state, nothing more. See README "Honest limits" for
  * the local-demo-only boundary this implies.
+ *
+ * Compared against the raw Host header, not req.nextUrl.host: behind a
+ * port mapping (e.g. Docker's 3005:3000), nextUrl.host can reflect the
+ * app's own internal binding instead of the host:port the browser actually
+ * connected to, which would reject every real same-origin browser request.
+ * The Host header is exactly what the client's connection target was.
  */
 export function isAllowedOrigin(req: NextRequest): boolean {
   const origin = req.headers.get("origin");
   if (!origin) return true;
+  const host = req.headers.get("host");
+  if (!host) return false;
   try {
-    return new URL(origin).host === req.nextUrl.host;
+    return new URL(origin).host === host;
   } catch {
     return false;
   }

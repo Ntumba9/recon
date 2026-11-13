@@ -120,9 +120,13 @@ describe("request safety", () => {
 
     it("allows a matching same-origin request", async () => {
       const finding = await createTestFinding(prisma);
+      // Deliberately sets Host to a different-looking address than the
+      // request URL itself, the way a real request behind a port mapping
+      // (e.g. Docker's 3005:3000) would: the check must compare Origin
+      // against this Host header, not against the URL's own host.
       const req = new NextRequest(`http://localhost/api/findings/${finding.id}/status`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", origin: "http://localhost" },
+        headers: { "Content-Type": "application/json", origin: "http://localhost:3005", host: "localhost:3005" },
         body: JSON.stringify({ status: "ACKNOWLEDGED" }),
       });
       const res = await postFindingStatus(req, { params: Promise.resolve({ id: finding.id }) });
