@@ -9,3 +9,5 @@ dist/
 coverage/
 mock-provider/data.json
 *.tsbuildinfo
+playwright-report/
+test-results/

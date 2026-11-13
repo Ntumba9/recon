@@ -11,6 +11,7 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:e2e": "playwright test",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate deploy",
     "prisma:migrate:dev": "prisma migrate dev",
@@ -27,16 +28,20 @@
     "zod": "4.6.7"
   },
   "devDependencies": {
+    "@eslint/eslintrc": "3.3.7",
+    "@playwright/test": "1.65.0",
+    "@testing-library/jest-dom": "6.6.3",
+    "@testing-library/react": "16.3.0",
     "@types/node": "22.20.5",
     "@types/react": "18.3.3",
     "@types/react-dom": "18.3.0",
+    "eslint": "9.39.5",
+    "eslint-config-next": "16.4.6",
+    "jsdom": "25.0.1",
     "prisma": "5.20.0",
     "tsx": "4.23.15",
     "typescript": "5.5.4",
-    "vitest": "5.1.0",
-    "eslint": "9.39.5",
-    "@eslint/eslintrc": "3.3.7",
-    "eslint-config-next": "16.4.6"
+    "vitest": "5.1.0"
   },
   "engines": {
     "node": ">=20"
