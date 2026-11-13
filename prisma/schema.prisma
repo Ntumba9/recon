@@ -43,6 +43,23 @@ enum FindingStatus {
   RESOLVED
 }
 
+/// What caused a FindingHistoryEntry: a human through the status API, or
+/// the reconciler automatically reopening a RESOLVED finding.
+enum HistoryChangeSource {
+  MANUAL
+  RECONCILIATION
+}
+
+/// What happened to a FindingRecord's note in one FindingHistoryEntry.
+/// UNCHANGED covers both "note omitted from the request" and "the request
+/// resubmitted the same text that was already there" - either way nothing
+/// about the note actually changed.
+enum NoteChangeType {
+  UNCHANGED
+  SET
+  CLEARED
+}
+
 /// A booking in the business's own system. Booking state and payment state
 /// are tracked separately on purpose: a CONFIRMED booking does not imply a
 /// successful payment was ever observed, and vice versa.
@@ -86,6 +103,7 @@ model ReconciliationRun {
   providerAvailable Boolean     @default(true)
   notes             String?
   occurrences       FindingOccurrence[]
+  historyEntries    FindingHistoryEntry[]
 }
 
 /// The stable identity of a finding. The same underlying discrepancy
@@ -108,11 +126,52 @@ model FindingRecord {
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
+  /// Optimistic-concurrency token: incremented on every write to this row
+  /// (status/note changes and reconciliation touches alike). A write
+  /// conditioned on the version it read affecting zero rows means someone
+  /// else committed first - see src/app/api/findings/[id]/status/route.ts
+  /// and src/core/reconciler/runReconciliation.ts.
+  version Int @default(1)
+
   occurrences FindingOccurrence[]
+  history     FindingHistoryEntry[]
 
   @@index([mismatchClass])
   @@index([orderReference])
   @@index([status])
+}
+
+/// One recorded change to a FindingRecord's status and/or note - append
+/// only, never updated or deleted, so it stays a trustworthy audit trail
+/// independent of the record's current (mutable) state. Entries exist only
+/// for changes made after this feature shipped; no history is fabricated
+/// for a record's earlier life.
+model FindingHistoryEntry {
+  id              String        @id @default(cuid())
+  findingRecordId String
+  findingRecord   FindingRecord @relation(fields: [findingRecordId], references: [id])
+
+  previousStatus FindingStatus
+  newStatus      FindingStatus
+
+  changeSource HistoryChangeSource
+  noteChangeType NoteChangeType
+  /// The note's new value - set only when noteChangeType is SET; null for
+  /// UNCHANGED and CLEARED alike (a cleared note's new value is always null).
+  newNote String?
+
+  /// Set only when changeSource is RECONCILIATION (an automatic reopen);
+  /// null for every manual, human-driven change.
+  sourceRunId String?
+  sourceRun   ReconciliationRun? @relation(fields: [sourceRunId], references: [id])
+
+  createdAt DateTime @default(now())
+  /// Monotonically increasing per row, independent of wall-clock
+  /// resolution, so timeline ordering stays deterministic even when two
+  /// entries share the same createdAt millisecond.
+  sequence  Int      @default(autoincrement())
+
+  @@index([findingRecordId, sequence])
 }
 
 /// One run's evidence for a given FindingRecord. Preserves run history

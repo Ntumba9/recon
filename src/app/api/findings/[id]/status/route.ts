@@ -2,12 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { newRequestId } from "@/lib/errors";
 import { statusTransitionSchema } from "@/core/findings/statusTransitionSchema";
+import { updateFindingStatus } from "@/core/findings/updateFindingStatus";
 
 /**
  * Changes a finding's lifecycle status (OPEN / ACKNOWLEDGED / RESOLVED).
  * This endpoint annotates the FindingRecord only - it never writes to
  * Order or any payment data, and it performs no automatic action
- * (no refund, retry, or booking correction).
+ * (no refund, retry, or booking correction). The status/note write and its
+ * history entry are applied together - see updateFindingStatus for the
+ * transaction and concurrency handling.
  *
  * Note contract (see src/core/findings/statusTransitionSchema.ts):
  *  - "note" absent from the body -> the existing note is preserved as-is.
@@ -30,26 +33,20 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     return NextResponse.json({ error: "invalid_payload", issues: parsed.error.issues, requestId }, { status: 400 });
   }
 
-  const existing = await prisma.findingRecord.findUnique({ where: { id } });
-  if (!existing) {
-    return NextResponse.json({ error: "not_found", requestId }, { status: 404 });
-  }
-
   const noteFieldPresent = typeof parsedJson === "object" && parsedJson !== null && "note" in parsedJson;
-  const nextNote = !noteFieldPresent
-    ? existing.note
-    : parsed.data.note === null || parsed.data.note === ""
-      ? null
-      : (parsed.data.note ?? null);
 
-  const updated = await prisma.findingRecord.update({
-    where: { id },
-    data: {
-      status: parsed.data.status,
-      note: nextNote,
-      statusChangedAt: new Date(),
-    },
+  const outcome = await updateFindingStatus(prisma, id, {
+    status: parsed.data.status,
+    noteFieldPresent,
+    note: parsed.data.note,
   });
 
-  return NextResponse.json({ ok: true, finding: { id: updated.id, status: updated.status, note: updated.note }, requestId });
+  if (outcome.result === "not_found") {
+    return NextResponse.json({ error: "not_found", requestId }, { status: 404 });
+  }
+  if (outcome.result === "conflict") {
+    return NextResponse.json({ error: "conflict", requestId }, { status: 409 });
+  }
+
+  return NextResponse.json({ ok: true, finding: outcome.finding, requestId });
 }
