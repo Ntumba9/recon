@@ -76,6 +76,12 @@ model WebhookEvent {
 }
 
 /// One execution of the reconciler over a time window.
+///
+/// A partial unique index (migrations/20261113090000_run_lock_unique_index,
+/// not representable in Prisma's schema language) enforces that at most one
+/// row can have finishedAt IS NULL ("in progress") at a time - starting a
+/// second concurrent run fails at the database with a unique-constraint
+/// violation, which src/app/api/runs/route.ts maps to 409 run_in_progress.
 model ReconciliationRun {
   id                String      @id @default(cuid())
   startedAt         DateTime    @default(now())
