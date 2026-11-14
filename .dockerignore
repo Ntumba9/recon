@@ -1,0 +1,14 @@
+.git
+node_modules
+mock-provider/node_modules
+.next
+out
+dist
+coverage
+playwright-report
+test-results
+python-cli/__pycache__
+python-cli/.venv
+*.log
+.env
+.env.*.local
