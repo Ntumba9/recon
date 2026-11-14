@@ -149,6 +149,13 @@ test.describe.serial("RECON end-to-end flows", () => {
   });
 
   test("a request with a mismatched Origin is rejected and changes nothing", async ({ page }) => {
+    // Self-contained: an earlier test (the signed-webhook flow) resets and
+    // wipes every FindingRecord, so this test seeds and runs its own rather
+    // than assuming one is left over from elsewhere in the suite.
+    await resetAndSeed();
+    const runRes = await page.request.post("/api/runs");
+    expect(runRes.ok()).toBeTruthy();
+
     const finding = await prisma.findingRecord.findFirstOrThrow();
     const before = await prisma.findingRecord.findUniqueOrThrow({ where: { id: finding.id } });
 
