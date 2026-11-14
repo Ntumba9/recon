@@ -13,6 +13,7 @@ export type ApiErrorCode =
   | "not_found"
   | "run_in_progress"
   | "invalid_transition"
+  | "conflict"
   | "payload_too_large"
   | "unsupported_media_type"
   | "forbidden_origin"
@@ -24,6 +25,7 @@ const STATUS_BY_CODE: Record<ApiErrorCode, number> = {
   not_found: 404,
   run_in_progress: 409,
   invalid_transition: 409,
+  conflict: 409,
   payload_too_large: 413,
   unsupported_media_type: 415,
   forbidden_origin: 403,

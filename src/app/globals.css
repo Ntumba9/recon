@@ -280,6 +280,29 @@ button:disabled {
   color: var(--color-success);
 }
 
+/* Finding history: an expandable, append-only timeline. */
+.history-summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  margin: var(--space-2) 0 0;
+}
+
+.history-empty {
+  font-size: 13px;
+  color: var(--color-muted);
+  margin: var(--space-2) 0 0;
+}
+
+.history-list {
+  margin: var(--space-2) 0 0;
+  padding-left: 18px;
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
 .empty-state {
   margin-top: var(--space-6);
   color: var(--color-muted);

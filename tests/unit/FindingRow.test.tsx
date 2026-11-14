@@ -29,6 +29,7 @@ const baseProps = {
   lastSeenRunId: "run_1",
   note: null,
   evidence: {},
+  history: [],
   columnCount: 7,
 };
 

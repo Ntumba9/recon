@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { Fragment, useId, useState } from "react";
 import { formatEvidence } from "./formatEvidence";
+import { FindingHistory, type HistoryEntryView } from "./FindingHistory";
 
 type Status = "OPEN" | "ACKNOWLEDGED" | "RESOLVED";
 
@@ -50,6 +51,7 @@ export interface FindingRowProps {
   lastSeenRunId: string;
   note: string | null;
   evidence: Record<string, unknown>;
+  history: HistoryEntryView[];
   columnCount: number;
 }
 
@@ -80,6 +82,7 @@ export function FindingRow({
   lastSeenRunId,
   note,
   evidence,
+  history,
   columnCount,
 }: FindingRowProps) {
   const router = useRouter();
@@ -106,7 +109,11 @@ export function FindingRow({
         return;
       }
       if (res.status === 409) {
-        setFeedback({ kind: "error", message: "This finding changed since the page loaded. Refreshed to the current state." });
+        // "conflict" (lost a concurrency race) and "invalid_transition"
+        // (a disallowed move, e.g. RESOLVED straight to ACKNOWLEDGED) are
+        // both 409s but mean different things - the server's own message
+        // already says which, so it's shown as-is rather than guessed at.
+        setFeedback({ kind: "error", message: data?.message ?? "This finding changed since the page loaded." });
         router.refresh();
         return;
       }
@@ -199,6 +206,8 @@ export function FindingRow({
                 {feedback.message}
               </p>
             )}
+
+            <FindingHistory entries={history} />
           </td>
         </tr>
       )}

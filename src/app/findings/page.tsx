@@ -4,6 +4,9 @@ import { prisma } from "@/lib/db";
 import { FindingRow } from "./FindingRow";
 import { MISMATCH_CLASSES, SEVERITIES, STATUSES, parseFindingsSearchParams } from "./filters";
 
+/** Cap on how many of a finding's most recent history entries the page loads - a reasonable bound for a demo, not a hard product limit. */
+const HISTORY_PAGE_SIZE = 50;
+
 export const dynamic = "force-dynamic";
 
 const COLUMN_COUNT = 7;
@@ -50,7 +53,10 @@ export default async function FindingsPage({ searchParams }: PageProps) {
     prisma.findingRecord.count({ where }),
     prisma.findingRecord.findMany({
       where,
-      include: { occurrences: { orderBy: { createdAt: "desc" }, take: 1 } },
+      include: {
+        occurrences: { orderBy: { createdAt: "desc" }, take: 1 },
+        history: { orderBy: { sequence: "desc" }, take: HISTORY_PAGE_SIZE },
+      },
       orderBy: [{ mismatchClass: "asc" }, { orderReference: "asc" }],
       skip: (page - 1) * pageSize,
       take: pageSize,
@@ -177,6 +183,7 @@ export default async function FindingsPage({ searchParams }: PageProps) {
                   lastSeenRunId={record.lastSeenRunId}
                   note={record.note}
                   evidence={(occurrence?.evidence as Record<string, unknown>) ?? {}}
+                  history={record.history}
                   columnCount={COLUMN_COUNT}
                 />
               );

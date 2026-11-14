@@ -4,13 +4,15 @@ import { newRequestId } from "@/lib/errors";
 import { apiError } from "@/lib/apiError";
 import { MAX_BODY_BYTES, hasJsonContentType, isAllowedOrigin, readBodyWithLimit } from "@/lib/httpGuards";
 import { statusTransitionSchema } from "@/core/findings/statusTransitionSchema";
-import { isValidTransition } from "@/core/findings/validTransition";
+import { updateFindingStatus } from "@/core/findings/updateFindingStatus";
 
 /**
  * Changes a finding's lifecycle status (OPEN / ACKNOWLEDGED / RESOLVED).
  * This endpoint annotates the FindingRecord only - it never writes to
  * Order or any payment data, and it performs no automatic action
- * (no refund, retry, or booking correction).
+ * (no refund, retry, or booking correction). The status/note write and its
+ * history entry are applied together - see updateFindingStatus for the
+ * transaction and concurrency handling.
  *
  * Note contract (see src/core/findings/statusTransitionSchema.ts):
  *  - "note" absent from the body -> the existing note is preserved as-is.
@@ -19,8 +21,10 @@ import { isValidTransition } from "@/core/findings/validTransition";
  *
  * Error shape: every failure is { error, message, requestId } (see
  * src/lib/apiError.ts) - invalid_json/invalid_body (400), not_found (404),
- * invalid_transition (409), payload_too_large (413), unsupported_media_type
- * (415), forbidden_origin (403).
+ * invalid_transition or conflict (409 - a disallowed status change vs. a
+ * write that lost a concurrency race and should be retried against fresh
+ * state), payload_too_large (413), unsupported_media_type (415),
+ * forbidden_origin (403).
  */
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const requestId = newRequestId();
@@ -55,30 +59,23 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     return apiError("invalid_body", message, requestId);
   }
 
-  const existing = await prisma.findingRecord.findUnique({ where: { id } });
-  if (!existing) {
-    return apiError("not_found", `No finding with id ${id}.`, requestId);
-  }
-
-  if (!isValidTransition(existing.status, parsed.data.status)) {
-    return apiError("invalid_transition", `Cannot move a finding from ${existing.status} to ${parsed.data.status}.`, requestId);
-  }
-
   const noteFieldPresent = typeof parsedJson === "object" && parsedJson !== null && "note" in parsedJson;
-  const nextNote = !noteFieldPresent
-    ? existing.note
-    : parsed.data.note === null || parsed.data.note === ""
-      ? null
-      : (parsed.data.note ?? null);
 
-  const updated = await prisma.findingRecord.update({
-    where: { id },
-    data: {
-      status: parsed.data.status,
-      note: nextNote,
-      statusChangedAt: new Date(),
-    },
+  const outcome = await updateFindingStatus(prisma, id, {
+    status: parsed.data.status,
+    noteFieldPresent,
+    note: parsed.data.note,
   });
 
-  return NextResponse.json({ ok: true, finding: { id: updated.id, status: updated.status, note: updated.note }, requestId });
+  if (outcome.result === "not_found") {
+    return apiError("not_found", `No finding with id ${id}.`, requestId);
+  }
+  if (outcome.result === "invalid_transition") {
+    return apiError("invalid_transition", `Cannot move a finding from ${outcome.from} to ${outcome.to}.`, requestId);
+  }
+  if (outcome.result === "conflict") {
+    return apiError("conflict", "This finding was changed by another request. Refresh and try again.", requestId);
+  }
+
+  return NextResponse.json({ ok: true, finding: outcome.finding, requestId });
 }

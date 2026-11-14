@@ -7,6 +7,9 @@ const MOCK_PROVIDER_URL = process.env.MOCK_PROVIDER_URL ?? "http://localhost:400
 const WEBHOOK_SECRET = process.env.MOCK_PROVIDER_WEBHOOK_SECRET ?? "whsec_ci_test_secret_do_not_use_0123456789";
 
 async function resetAndSeed() {
+  // FindingHistoryEntry references FindingRecord with ON DELETE RESTRICT,
+  // so it has to be cleared first.
+  await prisma.findingHistoryEntry.deleteMany();
   await prisma.findingOccurrence.deleteMany();
   await prisma.findingRecord.deleteMany();
   await prisma.reconciliationRun.deleteMany();

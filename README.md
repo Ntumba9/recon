@@ -246,6 +246,74 @@ correction anywhere in RECON.
   reopen above; moving a finding to `ACKNOWLEDGED` or `RESOLVED` is always
   a deliberate action through the status endpoint.
 
+## Finding history
+
+Every status or note change to a finding - manual or automatic - is also
+recorded as an append-only `FindingHistoryEntry`
+(`prisma/schema.prisma`), kept separate from the finding's current
+(mutable) state so the trail itself can't be edited after the fact. History
+exists only for changes made after this feature shipped; nothing is
+fabricated for a finding's earlier life.
+
+- **What's recorded**: the finding, the previous and new status, whether
+  the change was `MANUAL` (through the status endpoint) or
+  `RECONCILIATION` (an automatic reopen, which also records the
+  reconciliation run that caused it), and what happened to the note -
+  `UNCHANGED`, `SET` (with the new text), or `CLEARED`. A note-only edit
+  (status unchanged) still gets its own entry.
+- **Atomicity**: the `FindingRecord` write and its `FindingHistoryEntry`
+  happen in the same database transaction (`src/core/findings/
+  updateFindingStatus.ts` for manual changes, `src/core/reconciler/
+  runReconciliation.ts` for automatic reopens) - either both commit or
+  neither does.
+- **Concurrency**: `FindingRecord.version` is an optimistic-concurrency
+  token incremented on every write. A write is conditioned on the version
+  it read; if another writer (a second manual request, or a reconciliation
+  reopen) commits first, the condition matches zero rows, and the code
+  re-reads the now-current row and retries its own request's intent
+  against that fresh state, instead of overwriting it with stale data.
+  Before every attempt, if the request would be a true no-op against the
+  current state (identical resulting status and note), nothing is written
+  and no history entry is created - this is what keeps a retried or
+  losing-the-race request from producing a duplicate entry. Retries are
+  bounded (3 attempts); sustained contention surfaces as a conflict rather
+  than looping forever. This protects one finding's row against concurrent
+  writers to itself - it is not a distributed lock and gives no
+  cross-table serializability.
+- **On the findings page**: each row has an expandable "History" disclosure
+  (a native `<details>`/`<summary>` element - keyboard-operable and
+  screen-reader-friendly with no script required) listing every entry
+  newest first, with its timestamp, the status transition (or "unchanged"),
+  the note change, and whether it was manual or automatic.
+- **Ordering**: entries carry a monotonically increasing `sequence` in
+  addition to their timestamp, so the timeline's order stays deterministic
+  even if two entries share the same millisecond.
+
+### Trying it out
+
+With the demo running (see "Running the demo"), pick a finding id from
+`/findings` or `GET /api/runs`, then:
+
+```bash
+# A note-only edit: status stays the same, only the note changes.
+curl -X POST http://localhost:3005/api/findings/<id>/status \
+  -H "Content-Type: application/json" \
+  -d '{"status":"OPEN","note":"checked the provider dashboard"}'
+
+# Acknowledge, then resolve - each a separate history entry.
+curl -X POST http://localhost:3005/api/findings/<id>/status \
+  -H "Content-Type: application/json" -d '{"status":"ACKNOWLEDGED"}'
+curl -X POST http://localhost:3005/api/findings/<id>/status \
+  -H "Content-Type: application/json" -d '{"status":"RESOLVED"}'
+```
+
+Reload `/findings` and open that row's "History" disclosure to see all
+three entries, newest first. To see an automatic reopen, resolve a finding
+that a later complete reconciliation run will detect again (e.g. the
+`confirmed_no_payment` demo scenario), then trigger a run from `/runs` -
+its history will show a `RECONCILIATION`-sourced entry referencing that
+run's id.
+
 ## Threat model
 
 - **Webhook spoofing / tampering** - mitigated by HMAC-SHA256 over the raw
@@ -310,9 +378,13 @@ correction anywhere in RECON.
   one specific failure mode (a declared total that doesn't match what
   pagination returns); it doesn't simulate other partial-export shapes,
   such as a page that times out mid-response.
-- **No snooze state, and no history of past status changes.** A finding
-  remembers only its current status, note, and when that status last
-  changed - not who changed it or what it was before.
+- **No snooze state.** Beyond the OPEN/ACKNOWLEDGED/RESOLVED lifecycle and
+  its history (see "Finding history"), there is no way to temporarily
+  suppress a finding from view.
+- **History has no identity.** The demo has no authentication, so no entry
+  is ever attributed to a person - only whether the change was a manual
+  action or an automatic reconciliation reopen. See "Finding history" for
+  what is and isn't recorded.
 
 ## Running the demo
 

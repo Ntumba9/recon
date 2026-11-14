@@ -30,6 +30,9 @@ class SlowProviderAdapter implements ProviderAdapter {
 
 describe("run lock: a partial unique index, not a findFirst-then-create race", () => {
   beforeEach(async () => {
+    // FindingHistoryEntry references FindingRecord with ON DELETE RESTRICT,
+    // so it has to be cleared first.
+    await prisma.findingHistoryEntry.deleteMany();
     await prisma.findingOccurrence.deleteMany();
     await prisma.findingRecord.deleteMany();
     await prisma.reconciliationRun.deleteMany();

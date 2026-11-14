@@ -105,6 +105,8 @@ export async function runReconciliation(opts: RunReconciliationOptions): Promise
   return { runId: run.id, status: result.status, findings: result.findings };
 }
 
+const MAX_PERSIST_RETRIES = 3;
+
 /**
  * Upserts each finding's stable FindingRecord and records this run's
  * evidence as a FindingOccurrence, inside one transaction per finding so a
@@ -112,9 +114,22 @@ export async function runReconciliation(opts: RunReconciliationOptions): Promise
  *
  * When `allowStatusTransitions` is true (a SUCCESS run only - never an
  * INCONCLUSIVE or FAILED one), a RESOLVED finding whose discrepancy recurs
- * is reopened automatically. An incomplete run still records the
- * occurrence for whatever presence-based findings it did produce, but must
- * never touch a FindingRecord's lifecycle status.
+ * is reopened automatically, and that reopen is recorded as a
+ * FindingHistoryEntry referencing this run (changeSource RECONCILIATION).
+ * An incomplete run still records the occurrence for whatever
+ * presence-based findings it did produce, but must never touch a
+ * FindingRecord's lifecycle status or write a history entry.
+ *
+ * Concurrency: an existing record's update is conditioned on the
+ * `version` read moments earlier in the same attempt (the same
+ * optimistic-concurrency token the manual status endpoint uses - see
+ * src/core/findings/updateFindingStatus.ts). If a manual edit commits in
+ * between - most importantly, one that moves the finding off RESOLVED
+ * before this reopen would apply - the conditioned write affects zero
+ * rows; this re-reads the now-current record and retries, so a reopen is
+ * never forced onto a finding a human has just moved on from. Up to
+ * MAX_PERSIST_RETRIES per finding; exhausting that logs and skips this
+ * finding for this run rather than looping forever under contention.
  */
 async function persistFindings(
   prisma: PrismaClient,
@@ -123,54 +138,100 @@ async function persistFindings(
   allowStatusTransitions: boolean
 ): Promise<void> {
   for (const finding of findings) {
-    await prisma.$transaction(async (tx) => {
+    await persistOneFinding(prisma, runId, finding, allowStatusTransitions);
+  }
+}
+
+async function persistOneFinding(
+  prisma: PrismaClient,
+  runId: string,
+  finding: Finding,
+  allowStatusTransitions: boolean
+): Promise<void> {
+  for (let attempt = 0; attempt < MAX_PERSIST_RETRIES; attempt++) {
+    const applied = await prisma.$transaction(async (tx) => {
       const existing = await tx.findingRecord.findUnique({ where: { findingKey: finding.findingKey } });
 
-      const shouldReopen = allowStatusTransitions && existing?.status === "RESOLVED";
+      if (!existing) {
+        const record = await tx.findingRecord.create({
+          data: {
+            findingKey: finding.findingKey,
+            mismatchClass: finding.mismatchClass,
+            orderReference: finding.orderReference,
+            providerPaymentId: finding.providerPaymentId,
+            currency: finding.currency,
+            amountMinor: finding.amountMinor,
+            firstSeenRunId: runId,
+            lastSeenRunId: runId,
+          },
+        });
+        await upsertOccurrence(tx, record.id, runId, finding);
+        return true;
+      }
 
-      const record = existing
-        ? await tx.findingRecord.update({
-            where: { id: existing.id },
-            data: {
-              lastSeenRunId: runId,
-              currency: finding.currency,
-              amountMinor: finding.amountMinor,
-              ...(shouldReopen ? { status: "OPEN" as const, statusChangedAt: new Date() } : {}),
-            },
-          })
-        : await tx.findingRecord.create({
-            data: {
-              findingKey: finding.findingKey,
-              mismatchClass: finding.mismatchClass,
-              orderReference: finding.orderReference,
-              providerPaymentId: finding.providerPaymentId,
-              currency: finding.currency,
-              amountMinor: finding.amountMinor,
-              firstSeenRunId: runId,
-              lastSeenRunId: runId,
-            },
-          });
+      const shouldReopen = allowStatusTransitions && existing.status === "RESOLVED";
+
+      const writeResult = await tx.findingRecord.updateMany({
+        where: { id: existing.id, version: existing.version },
+        data: {
+          lastSeenRunId: runId,
+          currency: finding.currency,
+          amountMinor: finding.amountMinor,
+          version: { increment: 1 },
+          ...(shouldReopen ? { status: "OPEN" as const, statusChangedAt: new Date() } : {}),
+        },
+      });
+      if (writeResult.count === 0) return false;
 
       if (shouldReopen) {
-        logger.info("finding reopened: resolved discrepancy recurred", {
-          runId,
-          findingKey: finding.findingKey,
+        logger.info("finding reopened: resolved discrepancy recurred", { runId, findingKey: finding.findingKey });
+        await tx.findingHistoryEntry.create({
+          data: {
+            findingRecordId: existing.id,
+            previousStatus: "RESOLVED",
+            newStatus: "OPEN",
+            changeSource: "RECONCILIATION",
+            noteChangeType: "UNCHANGED",
+            sourceRunId: runId,
+          },
         });
       }
 
-      await tx.findingOccurrence.upsert({
-        where: { findingRecordId_runId: { findingRecordId: record.id, runId } },
-        create: {
-          findingRecordId: record.id,
-          runId,
-          severity: finding.severity,
-          evidence: finding.evidence as unknown as Prisma.InputJsonValue,
-        },
-        update: {
-          severity: finding.severity,
-          evidence: finding.evidence as unknown as Prisma.InputJsonValue,
-        },
-      });
+      await upsertOccurrence(tx, existing.id, runId, finding);
+      return true;
+    });
+
+    if (applied) return;
+    logger.warn("finding persist lost a concurrency race, retrying against fresh state", {
+      runId,
+      findingKey: finding.findingKey,
+      attempt,
     });
   }
+
+  logger.error("finding persist exhausted retries under contention, skipping for this run", {
+    runId,
+    findingKey: finding.findingKey,
+  });
+}
+
+async function upsertOccurrence(
+  tx: Prisma.TransactionClient,
+  findingRecordId: string,
+  runId: string,
+  finding: Finding
+): Promise<void> {
+  await tx.findingOccurrence.upsert({
+    where: { findingRecordId_runId: { findingRecordId, runId } },
+    create: {
+      findingRecordId,
+      runId,
+      severity: finding.severity,
+      evidence: finding.evidence as unknown as Prisma.InputJsonValue,
+    },
+    update: {
+      severity: finding.severity,
+      evidence: finding.evidence as unknown as Prisma.InputJsonValue,
+    },
+  });
 }
