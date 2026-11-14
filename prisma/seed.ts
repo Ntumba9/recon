@@ -36,6 +36,10 @@ function offsetDate(hours: number | undefined): Date {
 export async function seedOrders(): Promise<void> {
   const fixture = loadFixture();
 
+  // FindingHistoryEntry references FindingRecord with ON DELETE RESTRICT (an
+  // audit trail must never be deleted out from under a live record), so it
+  // has to go first.
+  await prisma.findingHistoryEntry.deleteMany();
   await prisma.findingOccurrence.deleteMany();
   await prisma.findingRecord.deleteMany();
   await prisma.reconciliationRun.deleteMany();

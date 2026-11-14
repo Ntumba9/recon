@@ -32,9 +32,11 @@ export function FindingActions({ id, status, note }: { id: string; status: Statu
   const router = useRouter();
   const [pending, setPending] = useState(false);
   const [noteDraft, setNoteDraft] = useState(note ?? "");
+  const [error, setError] = useState<string | null>(null);
 
   async function submit(body: { status: Status; note?: string | null }) {
     setPending(true);
+    setError(null);
     try {
       const res = await fetch(`/api/findings/${id}/status`, {
         method: "POST",
@@ -43,7 +45,13 @@ export function FindingActions({ id, status, note }: { id: string; status: Statu
       });
       if (res.ok) {
         router.refresh();
+      } else if (res.status === 409) {
+        setError("Another change landed first - refresh and try again.");
+      } else {
+        setError("Could not save that change.");
       }
+    } catch {
+      setError("Network error - could not reach the app.");
     } finally {
       setPending(false);
     }
@@ -82,6 +90,11 @@ export function FindingActions({ id, status, note }: { id: string; status: Statu
           </button>
         )}
       </div>
+      {error && (
+        <p role="alert" style={{ color: "crimson", fontSize: 12, margin: 0 }}>
+          {error}
+        </p>
+      )}
     </div>
   );
 }

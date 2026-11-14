@@ -53,6 +53,11 @@ describe("reconciliation integration", () => {
   const payments: ProviderPayment[] = [];
 
   beforeAll(async () => {
+    // FindingHistoryEntry references FindingRecord with ON DELETE RESTRICT,
+    // so it has to be cleared first - otherwise re-running this suite
+    // against a database that already has history fails the FindingRecord
+    // delete below.
+    await prisma.findingHistoryEntry.deleteMany();
     await prisma.findingOccurrence.deleteMany();
     await prisma.findingRecord.deleteMany();
     await prisma.reconciliationRun.deleteMany();
@@ -321,6 +326,208 @@ describe("reconciliation integration", () => {
         expect(res.status).toBe(200);
         const updated = await prisma.findingRecord.findUniqueOrThrow({ where: { id: record.id } });
         expect(updated.note).toBeNull();
+      });
+    });
+
+    describe("finding history", () => {
+      async function createTestFinding(overrides: { status?: "OPEN" | "ACKNOWLEDGED" | "RESOLVED"; note?: string | null } = {}) {
+        const anyRun = await prisma.reconciliationRun.findFirstOrThrow();
+        return prisma.findingRecord.create({
+          data: {
+            findingKey: `history_test_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+            mismatchClass: "AMOUNT_CURRENCY_MISMATCH",
+            orderReference: "ord_history_test",
+            currency,
+            amountMinor: 1000,
+            firstSeenRunId: anyRun.id,
+            lastSeenRunId: anyRun.id,
+            status: overrides.status ?? "OPEN",
+            note: overrides.note ?? null,
+          },
+        });
+      }
+
+      function historyFor(findingRecordId: string) {
+        return prisma.findingHistoryEntry.findMany({
+          where: { findingRecordId },
+          orderBy: { sequence: "asc" },
+        });
+      }
+
+      it("rolls back both the status update and the history entry together if either write fails", async () => {
+        const record = await createTestFinding();
+
+        await expect(
+          prisma.$transaction(async (tx) => {
+            await tx.findingRecord.update({ where: { id: record.id }, data: { status: "ACKNOWLEDGED" } });
+            // sourceRunId references a row that does not exist, violating the
+            // foreign key and forcing the whole transaction to fail - the
+            // same write pattern updateFindingStatus and persistFindings use.
+            await tx.findingHistoryEntry.create({
+              data: {
+                findingRecordId: record.id,
+                previousStatus: "OPEN",
+                newStatus: "ACKNOWLEDGED",
+                changeSource: "MANUAL",
+                noteChangeType: "UNCHANGED",
+                sourceRunId: "does-not-exist",
+              },
+            });
+          })
+        ).rejects.toThrow();
+
+        const afterRollback = await prisma.findingRecord.findUniqueOrThrow({ where: { id: record.id } });
+        expect(afterRollback.status).toBe("OPEN");
+        expect(await prisma.findingHistoryEntry.count({ where: { findingRecordId: record.id } })).toBe(0);
+      });
+
+      it("an identical repeated request does not create a duplicate history entry", async () => {
+        const record = await createTestFinding();
+
+        const first = await postStatus(record.id, { status: "ACKNOWLEDGED", note: "investigating" });
+        expect(first.status).toBe(200);
+        const second = await postStatus(record.id, { status: "ACKNOWLEDGED", note: "investigating" });
+        expect(second.status).toBe(200);
+
+        const entries = await historyFor(record.id);
+        expect(entries).toHaveLength(1);
+
+        const updated = await prisma.findingRecord.findUniqueOrThrow({ where: { id: record.id } });
+        expect(updated.status).toBe("ACKNOWLEDGED");
+        expect(updated.note).toBe("investigating");
+      });
+
+      it("omitting note on a repeat request is also a no-op, not a duplicate entry", async () => {
+        const record = await createTestFinding({ note: "steady" });
+
+        await postStatus(record.id, { status: "ACKNOWLEDGED" });
+        await postStatus(record.id, { status: "ACKNOWLEDGED" });
+
+        expect(await historyFor(record.id)).toHaveLength(1);
+      });
+
+      it("handles two concurrent requests without a lost update, recording both as a consistent chain", async () => {
+        const record = await createTestFinding();
+
+        const [first, second] = await Promise.all([
+          postStatus(record.id, { status: "ACKNOWLEDGED" }),
+          postStatus(record.id, { status: "RESOLVED" }),
+        ]);
+        expect([first.status, second.status]).toEqual([200, 200]);
+
+        const final = await prisma.findingRecord.findUniqueOrThrow({ where: { id: record.id } });
+        expect(["ACKNOWLEDGED", "RESOLVED"]).toContain(final.status);
+
+        const entries = await historyFor(record.id);
+        expect(entries).toHaveLength(2);
+        // Whichever request committed first, the second must chain from it -
+        // not both claiming OPEN as their previousStatus, which would mean
+        // one write silently clobbered the other instead of retrying
+        // against the fresh state.
+        expect(entries[0]!.previousStatus).toBe("OPEN");
+        expect(entries[1]!.previousStatus).toBe(entries[0]!.newStatus);
+        expect(entries[1]!.newStatus).toBe(final.status);
+      });
+
+      it("records a note-only edit (status unchanged) as its own history entry", async () => {
+        const record = await createTestFinding({ status: "ACKNOWLEDGED", note: "old" });
+
+        const res = await postStatus(record.id, { status: "ACKNOWLEDGED", note: "updated" });
+        expect(res.status).toBe(200);
+
+        const entries = await historyFor(record.id);
+        expect(entries).toHaveLength(1);
+        expect(entries[0]!.previousStatus).toBe("ACKNOWLEDGED");
+        expect(entries[0]!.newStatus).toBe("ACKNOWLEDGED");
+        expect(entries[0]!.noteChangeType).toBe("SET");
+        expect(entries[0]!.newNote).toBe("updated");
+        expect(entries[0]!.changeSource).toBe("MANUAL");
+      });
+
+      it("records note preservation (omitted note) as noteChangeType UNCHANGED", async () => {
+        const record = await createTestFinding({ note: "keep me" });
+
+        await postStatus(record.id, { status: "ACKNOWLEDGED" });
+
+        const entries = await historyFor(record.id);
+        expect(entries).toHaveLength(1);
+        expect(entries[0]!.noteChangeType).toBe("UNCHANGED");
+        expect(entries[0]!.newNote).toBeNull();
+      });
+
+      it("records an explicit note clear as noteChangeType CLEARED", async () => {
+        const record = await createTestFinding({ note: "to clear" });
+
+        await postStatus(record.id, { status: "ACKNOWLEDGED", note: null });
+
+        const entries = await historyFor(record.id);
+        expect(entries).toHaveLength(1);
+        expect(entries[0]!.noteChangeType).toBe("CLEARED");
+        expect(entries[0]!.newNote).toBeNull();
+      });
+
+      it("records an automatic reopen with changeSource RECONCILIATION and a sourceRunId", async () => {
+        const confirmedNoPayment = scenarios.find((s) => s.id === "confirmed_no_payment")!;
+        const record = await prisma.findingRecord.findFirstOrThrow({
+          where: { orderReference: confirmedNoPayment.order.reference, mismatchClass: "CONFIRMED_WITHOUT_SUCCESSFUL_PAYMENT" },
+        });
+        await prisma.findingRecord.update({ where: { id: record.id }, data: { status: "RESOLVED" } });
+
+        const adapter = new FakeProviderAdapter(payments, true);
+        const result = await runReconciliation({
+          prisma,
+          adapter,
+          windowStart: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
+          windowEnd: new Date(Date.now() + 60 * 60 * 1000),
+          gracePeriodMs: 0,
+        });
+
+        const entries = await historyFor(record.id);
+        // This finding may already have an earlier reopen entry from a prior
+        // test in this file, so match this run specifically rather than
+        // just the first RECONCILIATION/OPEN entry found.
+        const reopenEntry = entries.find((e) => e.changeSource === "RECONCILIATION" && e.sourceRunId === result.runId);
+        expect(reopenEntry).toBeDefined();
+        expect(reopenEntry!.previousStatus).toBe("RESOLVED");
+        expect(reopenEntry!.newStatus).toBe("OPEN");
+        expect(reopenEntry!.noteChangeType).toBe("UNCHANGED");
+      });
+
+      it("never writes a history entry for a finding left untouched by an INCONCLUSIVE run", async () => {
+        const wrongAmount = scenarios.find((s) => s.id === "wrong_amount")!;
+        const record = await prisma.findingRecord.findFirstOrThrow({
+          where: { orderReference: wrongAmount.order.reference, mismatchClass: "AMOUNT_CURRENCY_MISMATCH" },
+        });
+        await prisma.findingRecord.update({ where: { id: record.id }, data: { status: "RESOLVED" } });
+        const historyBefore = (await historyFor(record.id)).length;
+
+        const adapter = new FakeProviderAdapter(payments, false);
+        const result = await runReconciliation({
+          prisma,
+          adapter,
+          windowStart: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
+          windowEnd: new Date(Date.now() + 60 * 60 * 1000),
+          gracePeriodMs: 0,
+        });
+        expect(result.status).toBe("INCONCLUSIVE");
+
+        const stillResolved = await prisma.findingRecord.findUniqueOrThrow({ where: { id: record.id } });
+        expect(stillResolved.status).toBe("RESOLVED");
+        expect(await historyFor(record.id)).toHaveLength(historyBefore);
+      });
+
+      it("returns history in deterministic order even when entries share a timestamp", async () => {
+        const record = await createTestFinding();
+
+        await postStatus(record.id, { status: "ACKNOWLEDGED" });
+        await postStatus(record.id, { status: "RESOLVED" });
+        await postStatus(record.id, { status: "OPEN" });
+
+        const entries = await historyFor(record.id);
+        expect(entries.map((e) => e.newStatus)).toEqual(["ACKNOWLEDGED", "RESOLVED", "OPEN"]);
+        for (let i = 1; i < entries.length; i += 1) {
+          expect(entries[i]!.sequence).toBeGreaterThan(entries[i - 1]!.sequence);
+        }
       });
     });
   });

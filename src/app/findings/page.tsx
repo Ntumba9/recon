@@ -2,6 +2,10 @@ import type { CSSProperties } from "react";
 import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { FindingActions } from "./FindingActions";
+import { FindingHistory } from "./FindingHistory";
+
+/** Cap on how many of a finding's most recent history entries the page loads - a reasonable bound for a demo, not a hard product limit. */
+const HISTORY_PAGE_SIZE = 50;
 
 export const dynamic = "force-dynamic";
 
@@ -41,6 +45,10 @@ export default async function FindingsPage({ searchParams }: PageProps) {
       occurrences: {
         orderBy: { createdAt: "desc" },
         take: 1,
+      },
+      history: {
+        orderBy: { sequence: "desc" },
+        take: HISTORY_PAGE_SIZE,
       },
     },
     orderBy: [{ mismatchClass: "asc" }, { orderReference: "asc" }],
@@ -110,6 +118,7 @@ export default async function FindingsPage({ searchParams }: PageProps) {
             <th style={cellStyle}>First seen run</th>
             <th style={cellStyle}>Last seen run</th>
             <th style={cellStyle}>Note</th>
+            <th style={cellStyle}>History</th>
             <th style={cellStyle}>Evidence</th>
             <th style={cellStyle}>Actions</th>
           </tr>
@@ -130,6 +139,9 @@ export default async function FindingsPage({ searchParams }: PageProps) {
                 <td style={cellStyle}>{record.firstSeenRunId}</td>
                 <td style={cellStyle}>{record.lastSeenRunId}</td>
                 <td style={{ ...cellStyle, maxWidth: 180, whiteSpace: "pre-wrap" }}>{record.note ?? "-"}</td>
+                <td style={{ ...cellStyle, minWidth: 220 }}>
+                  <FindingHistory entries={record.history} />
+                </td>
                 <td style={cellStyle}>
                   <pre style={{ margin: 0, fontSize: 12, whiteSpace: "pre-wrap" }}>
                     {JSON.stringify(occurrence?.evidence ?? {}, null, 2)}
