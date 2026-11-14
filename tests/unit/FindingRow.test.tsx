@@ -48,13 +48,17 @@ describe("FindingRow", () => {
     vi.unstubAllGlobals();
   });
 
-  it("shows the state-changed message and refreshes on a 409, without claiming success", async () => {
+  it("shows the server's own message and refreshes on a 409, without claiming success", async () => {
+    // A 409 covers two distinct server-side outcomes - "conflict" (lost a
+    // concurrency race) and "invalid_transition" (a disallowed move) - so
+    // the client shows whatever message the server sent rather than a
+    // fixed guess at which one happened.
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue({
         ok: false,
         status: 409,
-        json: async () => ({ error: "invalid_transition", message: "already changed" }),
+        json: async () => ({ error: "conflict", message: "This finding was changed by another request. Refresh and try again." }),
       }),
     );
 
@@ -62,7 +66,7 @@ describe("FindingRow", () => {
     await openDetailsAndAcknowledge();
 
     const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("This finding changed since the page loaded. Refreshed to the current state.");
+    expect(alert).toHaveTextContent("This finding was changed by another request. Refresh and try again.");
     expect(screen.queryByText("Saved.")).not.toBeInTheDocument();
     await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
   });
