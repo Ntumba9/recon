@@ -92,8 +92,10 @@ yourself. It can be lost in transit, delivered twice, arrive for the wrong
 event, or simply disagree with the provider's own record if something
 changed after it was sent. RECON treats every webhook delivery as an
 unverified claim: it is logged, used to drive the obvious same-direction
-booking update (a verified `payment.succeeded` event confirms its order),
-and then **re-checked independently** by the reconciler, which fetches the
+booking update (a verified `payment.succeeded` event whose own amount and
+currency agree with the order confirms it; a mismatched claim is still
+logged but the order is left alone for the reconciler to flag), and then
+**re-checked independently** by the reconciler, which fetches the
 provider's own payment records directly through its API and compares them
 against bookings. If the webhook and the provider disagree, that is itself
 a finding (`WEBHOOK_PROVIDER_DISAGREEMENT`), not something papered over.
@@ -212,7 +214,17 @@ correction anywhere in RECON.
 - **Changing status**: `POST /api/findings/:id/status` with a JSON body
   `{ "status": "ACKNOWLEDGED" | "RESOLVED" | "OPEN", "note"?: string | null }`.
   The payload is validated (`src/core/findings/statusTransitionSchema.ts`)
-  and the status must be one of the three values above.
+  and the status must be one of the three values above. The requested
+  status must also be a transition the findings page's own buttons expose
+  (OPEN -> ACKNOWLEDGED or RESOLVED; ACKNOWLEDGED -> RESOLVED or OPEN;
+  RESOLVED -> OPEN) or leave status unchanged (a note-only edit) -
+  anything else is rejected with `409 invalid_transition`
+  (`src/core/findings/validTransition.ts`). Every failure from this
+  endpoint and from `POST /api/runs` shares one shape,
+  `{ error, message, requestId }` (`src/lib/apiError.ts`): `400`
+  invalid_json/invalid_body, `404` not_found, `409` run_in_progress or
+  invalid_transition, `413` payload_too_large, `415`
+  unsupported_media_type, `403` forbidden_origin.
 - **Note contract**: omitting `note` from the body preserves the finding's
   existing note untouched; `"note": null` or `"note": ""` (empty after
   trimming) explicitly clears it; `"note": "<text>"` replaces it. The
@@ -321,6 +333,23 @@ run's id.
   finding-status endpoint, or the run-trigger endpoint, and the mock
   provider has no analogous protections of its own since it represents a
   third party RECON doesn't control.
+- **Request hygiene on the two browser-facing mutation routes** (`POST
+  /api/runs`, `POST /api/findings/:id/status`): a request whose `Origin`
+  header doesn't match this app's own host is rejected with `403`, and a
+  non-empty body must be declared `application/json` (`415` otherwise) -
+  see `src/lib/httpGuards.ts`. **This is a same-origin check, not
+  authentication**: it stops a cross-origin browser page from driving these
+  endpoints with the browser's own ambient state (cookies, session), but
+  anyone with direct network access to this unauthenticated local demo -
+  curl, a script, another process on the machine - can still call them
+  directly, since a request with no `Origin` header at all is always
+  allowed. The provider webhook deliberately has no Origin/Content-Type
+  check at all - it's authenticated by its HMAC signature instead, which an
+  Origin header can't provide anyway for a server-to-server delivery.
+- **Every request body, on all three POST routes, is capped at 64 KB**,
+  read as a stream rather than trusted via `Content-Length` (so neither an
+  absent nor a spoofed-smaller length header lets an oversized body
+  through) - see `src/lib/httpGuards.ts`.
 
 ## Honest limits
 
@@ -328,12 +357,14 @@ run's id.
   the webhook endpoint, the finding-status endpoint, and the run-trigger
   endpoint all have no auth. This is explicitly not meant to run anywhere
   but a local machine for this demo.
-- **Run concurrency is best-effort.** The in-process flag and database
-  check that prevent overlapping runs (see "Reconciliation runs") cover a
-  double-click and a crashed/restarted process, but a run started by a
-  genuinely different process within the 5-minute staleness window can
-  still race past both guards in principle - acceptable for a single-user
-  local demo, not a production concurrency control.
+- **Two concurrent runs can never both start.** A partial unique index on
+  `ReconciliationRun` (`finishedAt IS NULL`) means the database itself
+  rejects a second concurrent run's insert - not a `findFirst`-then-create
+  check racing against itself. What's still a heuristic, not a guarantee:
+  a run that crashes mid-flight leaves its row "in progress" until the
+  5-minute staleness timeout reaps it, during which a new run is correctly
+  refused as `run_in_progress` even though nothing is actually running -
+  acceptable for a single-user local demo, not a production SLA.
 - **The Python CLI can't detect an incomplete export on its own.** A static
   CSV file has no live pagination to double-check against, so completeness
   must be declared (`--declared-total` or `--mark-incomplete`); with

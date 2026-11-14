@@ -15,4 +15,4 @@ services:
     ## file's 5432 mapping rather than replacing it - leaving the 5432
     ## conflict in place. !override forces a real replacement.
     ports: !override
-      - "5433:5432"
+      - "127.0.0.1:5433:5432"

@@ -15,10 +15,13 @@ const UNIQUE_CONSTRAINT_VIOLATION = "P2002";
 /**
  * Webhook intake: validate payload shape, verify the raw-body HMAC signature
  * with a constant-time comparison, then durably dedup by eventId and (only
- * for a successfully-verified payment.succeeded event) confirm the booking,
- * all inside one transaction. A duplicate delivery is harmless: it is
- * detected by the unique eventId constraint and treated as a no-op, not an
- * error. The webhook never changes the provider's own record, and the
+ * for a payment.succeeded event whose own amount and currency match the
+ * order it names) confirm the booking, all inside one transaction. A
+ * duplicate delivery is harmless: it is detected by the unique eventId
+ * constraint and treated as a no-op, not an error. A mismatched amount or
+ * currency, or a booking that isn't PENDING/PAYMENT_PENDING (EXPIRED and
+ * CANCELLED never change), simply isn't confirmed - the event is still
+ * logged. The webhook never changes the provider's own record, and the
  * reconciler re-derives truth from the provider directly rather than
  * trusting this log - see src/core/reconciler.
  */
@@ -64,10 +67,18 @@ export async function handleWebhook(
       });
 
       if (payload.type === "payment.succeeded" && payload.orderReference) {
+        // Only the obvious same-direction update: a payment.succeeded claim
+        // whose own amount and currency agree with the order it names.
+        // A mismatched claim is still logged above as a WebhookEvent, but
+        // the order is left alone for the reconciler to flag against the
+        // provider's own record directly (AMOUNT_CURRENCY_MISMATCH) -
+        // never confirmed on the strength of a webhook's own numbers.
         await tx.order.updateMany({
           where: {
             reference: payload.orderReference,
             bookingStatus: { in: ["PENDING", "PAYMENT_PENDING"] },
+            amountMinor: payload.amountMinor,
+            currency: payload.currency,
           },
           data: { bookingStatus: "CONFIRMED" },
         });

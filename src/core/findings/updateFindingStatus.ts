@@ -1,5 +1,6 @@
 import type { FindingStatus, PrismaClient } from "@prisma/client";
 import { logger } from "@/lib/logger";
+import { isValidTransition } from "./validTransition";
 
 export interface UpdateFindingStatusInput {
   status: FindingStatus;
@@ -11,6 +12,7 @@ export interface UpdateFindingStatusInput {
 export type UpdateFindingStatusOutcome =
   | { result: "not_found" }
   | { result: "applied"; finding: { id: string; status: FindingStatus; note: string | null } }
+  | { result: "invalid_transition"; from: FindingStatus; to: FindingStatus }
   | { result: "conflict" };
 
 const MAX_RETRIES = 3;
@@ -46,6 +48,13 @@ function computeNextNote(current: string | null, input: UpdateFindingStatusInput
  * It is not a distributed lock and gives no cross-table serializability.
  * Sustained contention that exhausts MAX_RETRIES surfaces as a conflict
  * for the caller to retry; this function does not retry forever.
+ *
+ * The requested status is validated against the row's state as read at
+ * the start of each attempt (see validTransition.ts), not just once
+ * up front - a transition legal against the state the caller saw could
+ * become illegal against what another writer just committed, and the
+ * reverse. A status-unchanged (note-only) request is always a valid
+ * "transition" to itself.
  */
 export async function updateFindingStatus(
   prisma: PrismaClient,
@@ -60,6 +69,11 @@ export async function updateFindingStatus(
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     const row = current;
     const nextStatus = input.status;
+
+    if (!isValidTransition(row.status, nextStatus)) {
+      return { result: "invalid_transition", from: row.status, to: nextStatus };
+    }
+
     const nextNote = computeNextNote(row.note, input);
 
     const statusChanged = nextStatus !== row.status;

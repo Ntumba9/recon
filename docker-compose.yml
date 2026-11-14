@@ -6,7 +6,10 @@ services:
       POSTGRES_PASSWORD: recon
       POSTGRES_DB: recon
     ports:
-      - "5432:5432"
+      # Bound to localhost only - this port exists for local psql/GUI
+      # access, not for the app (which reaches postgres over the internal
+      # Docker network by service name) or anyone else on the network.
+      - "127.0.0.1:5432:5432"
     volumes:
       - recon-postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -24,7 +27,9 @@ services:
       MOCK_PROVIDER_WEBHOOK_SECRET: whsec_local_dev_only_not_a_real_secret
       APP_WEBHOOK_URL: http://app:3000/api/webhooks/provider
     ports:
-      - "4000:4000"
+      # Bound to localhost only, same reasoning as postgres above - the app
+      # reaches it over the internal Docker network, not this host port.
+      - "127.0.0.1:4000:4000"
 
   app:
     build:

@@ -9,6 +9,14 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    include: ["tests/**/*.test.ts"],
+    include: ["tests/**/*.test.ts", "tests/**/*.test.tsx"],
+    setupFiles: ["tests/setup/jestDom.ts"],
+    // The integration suites share one real Postgres database and each
+    // resets core tables (ReconciliationRun, FindingRecord, ...) at the
+    // start of its own run. Running test files in parallel lets one
+    // file's reset wipe data another file's tests are mid-way through
+    // relying on, so files run sequentially; tests within a single file
+    // already run sequentially by default regardless.
+    fileParallelism: false,
   },
 });

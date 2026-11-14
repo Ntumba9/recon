@@ -28,13 +28,17 @@ export function RunTrigger({ initialDisabled }: { initialDisabled: boolean }) {
     setError(null);
     setResult(null);
     try {
-      const res = await fetch("/api/runs", { method: "POST" });
+      const res = await fetch("/api/runs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      });
       const data = await res.json();
       if (!res.ok) {
         setError(
           data.error === "run_in_progress"
             ? "A reconciliation run is already in progress. Try again once it finishes."
-            : `Could not start the run (${data.error ?? res.status}).`
+            : (data.message ?? `Could not start the run (${data.error ?? res.status}).`)
         );
         return;
       }
@@ -49,15 +53,21 @@ export function RunTrigger({ initialDisabled }: { initialDisabled: boolean }) {
 
   return (
     <div style={{ marginBottom: 24 }}>
-      <button type="button" disabled={pending || initialDisabled} onClick={trigger}>
+      <button type="button" disabled={pending || initialDisabled} onClick={trigger} aria-busy={pending}>
         {pending ? "Running..." : "Run reconciliation"}
       </button>
       {initialDisabled && !pending && !result && (
-        <p style={{ color: "#555", marginTop: 8 }}>A run is already in progress - refresh to check.</p>
+        <p className="feedback" role="status">
+          A run is already in progress - refresh to check.
+        </p>
       )}
-      {error && <p style={{ color: "crimson", marginTop: 8 }}>{error}</p>}
+      {error && (
+        <p className="feedback feedback-error" role="alert">
+          {error}
+        </p>
+      )}
       {result && (
-        <p style={{ marginTop: 8 }}>
+        <p className="feedback feedback-success" role="status">
           Run finished: <strong>{result.status}</strong> - {result.findingCount} finding(s)
           {result.notes ? ` (${result.notes})` : ""}
         </p>

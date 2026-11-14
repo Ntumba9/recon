@@ -1,4 +1,4 @@
-interface HistoryEntryView {
+export interface HistoryEntryView {
   id: string;
   previousStatus: string;
   newStatus: string;
@@ -40,13 +40,13 @@ function describeSource(entry: HistoryEntryView): string {
  */
 export function FindingHistory({ entries }: { entries: HistoryEntryView[] }) {
   if (entries.length === 0) {
-    return <p style={{ fontSize: 12, color: "#777", margin: 0 }}>No recorded changes yet.</p>;
+    return <p className="history-empty">No recorded changes yet.</p>;
   }
 
   return (
     <details>
-      <summary style={{ cursor: "pointer", fontSize: 12 }}>History ({entries.length})</summary>
-      <ol style={{ margin: "8px 0 0", paddingLeft: 18, fontSize: 12, display: "flex", flexDirection: "column", gap: 6 }}>
+      <summary className="history-summary">History ({entries.length})</summary>
+      <ol className="history-list">
         {entries.map((entry) => (
           <li key={entry.id}>
             <time dateTime={entry.createdAt.toISOString()}>{entry.createdAt.toISOString()}</time>

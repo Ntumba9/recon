@@ -1,28 +1,27 @@
-import type { CSSProperties } from "react";
+import type { Prisma } from "@prisma/client";
 import Link from "next/link";
 import { prisma } from "@/lib/db";
-import { FindingActions } from "./FindingActions";
-import { FindingHistory } from "./FindingHistory";
+import { FindingRow } from "./FindingRow";
+import { MISMATCH_CLASSES, SEVERITIES, STATUSES, parseFindingsSearchParams } from "./filters";
 
 /** Cap on how many of a finding's most recent history entries the page loads - a reasonable bound for a demo, not a hard product limit. */
 const HISTORY_PAGE_SIZE = 50;
 
 export const dynamic = "force-dynamic";
 
-const MISMATCH_CLASSES = [
-  "SUCCESSFUL_PAYMENT_NOT_CONFIRMED",
-  "CONFIRMED_WITHOUT_SUCCESSFUL_PAYMENT",
-  "DUPLICATE_SUCCESSFUL_PAYMENT",
-  "AMOUNT_CURRENCY_MISMATCH",
-  "AGED_PENDING_BOOKING",
-  "WEBHOOK_PROVIDER_DISAGREEMENT",
-] as const;
-
-const SEVERITIES = ["INFO", "WARNING", "CRITICAL"] as const;
-const STATUSES = ["OPEN", "ACKNOWLEDGED", "RESOLVED"] as const;
+const COLUMN_COUNT = 7;
 
 interface PageProps {
-  searchParams: Promise<{ class?: string; severity?: string; status?: string }>;
+  searchParams: Promise<{ class?: string; severity?: string; status?: string; page?: string; run?: string }>;
+}
+
+function buildQuery(params: Record<string, string | undefined>): string {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value) search.set(key, value);
+  }
+  const query = search.toString();
+  return query ? `?${query}` : "";
 }
 
 /**
@@ -32,47 +31,89 @@ interface PageProps {
  */
 export default async function FindingsPage({ searchParams }: PageProps) {
   const resolvedSearchParams = await searchParams;
-  const classFilter = resolvedSearchParams.class;
-  const severityFilter = resolvedSearchParams.severity;
-  const statusFilter = resolvedSearchParams.status;
+  const { classFilter, severityFilter, statusFilter, page, pageSize } = parseFindingsSearchParams(resolvedSearchParams);
+  const runFilter = resolvedSearchParams.run;
 
-  const records = await prisma.findingRecord.findMany({
-    where: {
-      ...(classFilter ? { mismatchClass: classFilter } : {}),
-      ...(statusFilter ? { status: statusFilter as (typeof STATUSES)[number] } : {}),
-    },
-    include: {
-      occurrences: {
-        orderBy: { createdAt: "desc" },
-        take: 1,
-      },
-      history: {
-        orderBy: { sequence: "desc" },
-        take: HISTORY_PAGE_SIZE,
-      },
-    },
-    orderBy: [{ mismatchClass: "asc" }, { orderReference: "asc" }],
-  });
+  const where: Prisma.FindingRecordWhereInput = {
+    ...(classFilter ? { mismatchClass: classFilter } : {}),
+    ...(statusFilter ? { status: statusFilter } : {}),
+    // Severity lives on each run's FindingOccurrence, not the FindingRecord
+    // itself; every rule assigns one fixed severity per mismatch class, so
+    // "some occurrence has this severity" and "the latest one does" agree
+    // in practice.
+    ...(severityFilter ? { occurrences: { some: { severity: severityFilter } } } : {}),
+    ...(runFilter ? { occurrences: { some: { runId: runFilter } } } : {}),
+  };
 
-  const visible = severityFilter
-    ? records.filter((r) => r.occurrences[0]?.severity === severityFilter)
-    : records;
+  const [openCount, acknowledgedCount, resolvedCount, criticalCount, totalMatching, records] = await Promise.all([
+    prisma.findingRecord.count({ where: { status: "OPEN" } }),
+    prisma.findingRecord.count({ where: { status: "ACKNOWLEDGED" } }),
+    prisma.findingRecord.count({ where: { status: "RESOLVED" } }),
+    prisma.findingRecord.count({ where: { occurrences: { some: { severity: "CRITICAL" } } } }),
+    prisma.findingRecord.count({ where }),
+    prisma.findingRecord.findMany({
+      where,
+      include: {
+        occurrences: { orderBy: { createdAt: "desc" }, take: 1 },
+        history: { orderBy: { sequence: "desc" }, take: HISTORY_PAGE_SIZE },
+      },
+      orderBy: [{ mismatchClass: "asc" }, { orderReference: "asc" }],
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    }),
+  ]);
+
+  const totalPages = Math.max(1, Math.ceil(totalMatching / pageSize));
+  const rangeStart = totalMatching === 0 ? 0 : (page - 1) * pageSize + 1;
+  const rangeEnd = Math.min(page * pageSize, totalMatching);
+
+  const baseFilters = {
+    class: classFilter,
+    severity: severityFilter,
+    status: statusFilter,
+    run: runFilter,
+  };
 
   return (
-    <main style={{ maxWidth: 1250, margin: "0 auto", padding: "32px 24px" }}>
-      <h1 style={{ marginBottom: 4 }}>RECON findings</h1>
-      <p style={{ color: "#555", marginTop: 0 }}>
+    <main className="page">
+      <h1>RECON findings</h1>
+      <p className="page-intro">
         Synthetic demo data only. Unauthenticated local demo - the status actions below annotate a finding only; no
         refund, retry, or booking correction happens anywhere in RECON.
       </p>
-      <p style={{ marginTop: 0 }}>
+      <p className="page-nav">
         <Link href="/runs">View run history / trigger a run</Link>
       </p>
 
-      <form method="get" style={{ display: "flex", gap: 12, marginBottom: 24 }}>
-        <label>
-          Mismatch class{" "}
-          <select name="class" defaultValue={classFilter ?? ""}>
+      <dl className="summary-strip">
+        <div className="summary-stat">
+          <dt>Open</dt>
+          <dd>{openCount}</dd>
+        </div>
+        <div className="summary-stat">
+          <dt>Acknowledged</dt>
+          <dd>{acknowledgedCount}</dd>
+        </div>
+        <div className="summary-stat">
+          <dt>Resolved</dt>
+          <dd>{resolvedCount}</dd>
+        </div>
+        <div className="summary-stat is-critical">
+          <dt>Critical</dt>
+          <dd>{criticalCount}</dd>
+        </div>
+      </dl>
+
+      {runFilter && (
+        <p className="page-nav">
+          Filtered to run <code>{runFilter}</code>. <Link href={buildQuery({ class: classFilter, severity: severityFilter, status: statusFilter })}>Clear run filter</Link>
+        </p>
+      )}
+
+      <form method="get" className="filter-form">
+        <div className="filter-field">
+          <label htmlFor="class-filter">Mismatch class</label>
+          <select id="class-filter" name="class" defaultValue={classFilter ?? ""}>
             <option value="">All</option>
             {MISMATCH_CLASSES.map((c) => (
               <option key={c} value={c}>
@@ -80,10 +121,10 @@ export default async function FindingsPage({ searchParams }: PageProps) {
               </option>
             ))}
           </select>
-        </label>
-        <label>
-          Severity{" "}
-          <select name="severity" defaultValue={severityFilter ?? ""}>
+        </div>
+        <div className="filter-field">
+          <label htmlFor="severity-filter">Severity</label>
+          <select id="severity-filter" name="severity" defaultValue={severityFilter ?? ""}>
             <option value="">All</option>
             {SEVERITIES.map((s) => (
               <option key={s} value={s}>
@@ -91,10 +132,10 @@ export default async function FindingsPage({ searchParams }: PageProps) {
               </option>
             ))}
           </select>
-        </label>
-        <label>
-          Status{" "}
-          <select name="status" defaultValue={statusFilter ?? ""}>
+        </div>
+        <div className="filter-field">
+          <label htmlFor="status-filter">Status</label>
+          <select id="status-filter" name="status" defaultValue={statusFilter ?? ""}>
             <option value="">All</option>
             {STATUSES.map((s) => (
               <option key={s} value={s}>
@@ -102,63 +143,66 @@ export default async function FindingsPage({ searchParams }: PageProps) {
               </option>
             ))}
           </select>
-        </label>
-        <button type="submit">Filter</button>
+        </div>
+        <div className="filter-actions">
+          <button type="submit">Filter</button>
+          <Link href="/findings">Clear</Link>
+        </div>
       </form>
 
-      <table style={{ width: "100%", borderCollapse: "collapse", background: "white" }}>
-        <thead>
-          <tr style={{ textAlign: "left", borderBottom: "2px solid #ddd" }}>
-            <th style={cellStyle}>Mismatch class</th>
-            <th style={cellStyle}>Status</th>
-            <th style={cellStyle}>Severity</th>
-            <th style={cellStyle}>Order</th>
-            <th style={cellStyle}>Payment</th>
-            <th style={cellStyle}>Amount</th>
-            <th style={cellStyle}>First seen run</th>
-            <th style={cellStyle}>Last seen run</th>
-            <th style={cellStyle}>Note</th>
-            <th style={cellStyle}>History</th>
-            <th style={cellStyle}>Evidence</th>
-            <th style={cellStyle}>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {visible.map((record) => {
-            const occurrence = record.occurrences[0];
-            return (
-              <tr key={record.id} style={{ borderBottom: "1px solid #eee" }}>
-                <td style={cellStyle}>{record.mismatchClass}</td>
-                <td style={cellStyle}>{record.status}</td>
-                <td style={cellStyle}>{occurrence?.severity ?? "-"}</td>
-                <td style={cellStyle}>{record.orderReference ?? "-"}</td>
-                <td style={cellStyle}>{record.providerPaymentId ?? "-"}</td>
-                <td style={cellStyle}>
-                  {record.amountMinor !== null ? `${record.currency ?? ""} ${(record.amountMinor / 100).toFixed(2)}` : "-"}
-                </td>
-                <td style={cellStyle}>{record.firstSeenRunId}</td>
-                <td style={cellStyle}>{record.lastSeenRunId}</td>
-                <td style={{ ...cellStyle, maxWidth: 180, whiteSpace: "pre-wrap" }}>{record.note ?? "-"}</td>
-                <td style={{ ...cellStyle, minWidth: 220 }}>
-                  <FindingHistory entries={record.history} />
-                </td>
-                <td style={cellStyle}>
-                  <pre style={{ margin: 0, fontSize: 12, whiteSpace: "pre-wrap" }}>
-                    {JSON.stringify(occurrence?.evidence ?? {}, null, 2)}
-                  </pre>
-                </td>
-                <td style={cellStyle}>
-                  <FindingActions id={record.id} status={record.status} note={record.note} />
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+      <div className="table-scroll">
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>Mismatch class</th>
+              <th>Severity</th>
+              <th>Status</th>
+              <th>Order</th>
+              <th>Amount</th>
+              <th>Last seen run</th>
+              <th>
+                <span className="sr-only">Actions</span>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {records.map((record) => {
+              const occurrence = record.occurrences[0];
+              return (
+                <FindingRow
+                  key={record.id}
+                  id={record.id}
+                  mismatchClass={record.mismatchClass}
+                  severity={occurrence?.severity ?? null}
+                  status={record.status}
+                  orderReference={record.orderReference}
+                  providerPaymentId={record.providerPaymentId}
+                  amountMinor={record.amountMinor}
+                  currency={record.currency}
+                  firstSeenRunId={record.firstSeenRunId}
+                  lastSeenRunId={record.lastSeenRunId}
+                  note={record.note}
+                  evidence={(occurrence?.evidence as Record<string, unknown>) ?? {}}
+                  history={record.history}
+                  columnCount={COLUMN_COUNT}
+                />
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
 
-      {visible.length === 0 && <p style={{ marginTop: 24, color: "#555" }}>No findings match these filters.</p>}
+      {records.length === 0 && <p className="empty-state">No findings match these filters.</p>}
+
+      {totalMatching > 0 && (
+        <div className="pagination">
+          <span>
+            Showing {rangeStart}-{rangeEnd} of {totalMatching}
+          </span>
+          {page > 1 && <Link href={buildQuery({ ...baseFilters, page: String(page - 1) })}>Previous</Link>}
+          {page < totalPages && <Link href={buildQuery({ ...baseFilters, page: String(page + 1) })}>Next</Link>}
+        </div>
+      )}
     </main>
   );
 }
-
-const cellStyle: CSSProperties = { padding: "8px 12px", verticalAlign: "top" };
